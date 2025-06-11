@@ -1,11 +1,36 @@
 version: '3.8'
 
 services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./Backend/API/init.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=monitoring
+      - MYSQL_USER=monitor
+      - MYSQL_PASSWORD=monitor123
+    networks:
+      - monitor-network
+    restart: always
+
   api:
     build: 
       context: ./Backend/API
     ports:
       - "3000:3000"
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=monitor
+      - DB_PASSWORD=monitor123
+      - DB_NAME=monitoring
+    depends_on:
+      - mysql
     networks:
       - monitor-network
 
@@ -14,14 +39,13 @@ services:
       context: ./Backend/Agente
     depends_on:
       - api
-    volumes:
-      - /proc/cpu_201708880:/proc/cpu_201708880:ro
-      - /proc/ram_201708880:/proc/ram_201708880:ro
     environment:
-      - API_URL=http://api:3000/api/data
+      - API_URL=http://localhost:3000/api/data
       - POLL_INTERVAL=5s
-    networks:
-      - monitor-network
+    privileged: true
+    network_mode: "host"
+    volumes:
+      - /proc:/host/proc:ro
 
   frontend:
     build: 
@@ -37,3 +61,6 @@ services:
 
 networks:
   monitor-network:
+
+volumes:
+  mysql-data:

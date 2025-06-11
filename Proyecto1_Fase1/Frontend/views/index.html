@@ -245,13 +245,14 @@
         // Actualizar gráfica de CPU con nuevos datos
         function updateCpuChart(cpuData) {
             if (!cpuData) return;
-            
-            const uso = cpuData.porcentajeUso;
+
+            // Aquí usamos el campo porcentaje_uso de MySQL (el nombre cambió de porcentajeUso a porcentaje_uso)
+            const uso = cpuData.porcentaje_uso || cpuData.porcentajeUso;
             const libre = 100 - uso;
-            
+
             cpuChart.data.datasets[0].data = [uso, libre];
             cpuChart.update();
-            
+
             document.getElementById('cpu-details').innerHTML = `
                 <p>Uso actual: <strong>${uso}%</strong></p>
                 <p>Disponible: <strong>${libre}%</strong></p>
@@ -262,8 +263,7 @@
         function updateRamChart(ramData) {
             if (!ramData) return;
             
-            console.log('RAM data received:', ramData);
-            const uso = ramData.porcentajeUso;
+            const uso = ramData.porcentaje_uso || ramData.porcentajeUso;
             const libre = 100 - uso;
             
             ramChart.data.datasets[0].data = [uso, libre];
