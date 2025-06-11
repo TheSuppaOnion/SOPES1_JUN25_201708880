@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  api:
+    build: 
+      context: ./Backend/API
+    ports:
+      - "3000:3000"
+    networks:
+      - monitor-network
+
+  agente:
+    build: 
+      context: ./Backend/Agente
+    depends_on:
+      - api
+    volumes:
+      - /proc/cpu_201708880:/proc/cpu_201708880:ro
+      - /proc/ram_201708880:/proc/ram_201708880:ro
+    environment:
+      - API_URL=http://api:3000/api/data
+      - POLL_INTERVAL=5s
+    networks:
+      - monitor-network
+
+  frontend:
+    build: 
+      context: ./Frontend
+    ports:
+      - "8080:8080"
+    depends_on:
+      - api
+    environment:
+      - API_URL=http://localhost:3000
+    networks:
+      - monitor-network
+
+networks:
+  monitor-network:
