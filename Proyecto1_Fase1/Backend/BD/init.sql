@@ -24,9 +24,18 @@ CREATE TABLE IF NOT EXISTS ram_metrics (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Tabla para caché de métricas más recientes
+CREATE TABLE IF NOT EXISTS metrics_cache (
+    id VARCHAR(20) PRIMARY KEY,
+    timestamp BIGINT NOT NULL,
+    data JSON NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
 -- Crear índices para mejorar el rendimiento
 CREATE INDEX idx_cpu_timestamp ON cpu_metrics(timestamp);
 CREATE INDEX idx_ram_timestamp ON ram_metrics(timestamp);
+CREATE INDEX idx_metrics_cache_updated ON metrics_cache(updated_at);
 
 -- Añadir usuario con permisos solo para esta base de datos
 -- Esto ya se hace automáticamente a través de las variables de entorno en docker-compose

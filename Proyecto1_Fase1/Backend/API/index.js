@@ -4,12 +4,6 @@ const mysql = require('mysql2/promise');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-let metricsCache = {
-  cpu: null,
-  ram: null,
-  lastUpdated: 0
-};
-
 // Configuración de middleware
 app.use(cors());
 app.use(express.json());
@@ -49,18 +43,31 @@ let lastSampleTime = 0;
 app.post('/api/data', async (req, res) => {
   try {
     const { timestamp, cpu, ram } = req.body;
+    const now = Date.now();
     
     if (!timestamp || !cpu || !ram) {
       return res.status(400).json({ error: 'Datos incompletos' });
     }
 
-     metricsCache = {
-      cpu: { timestamp, porcentaje_uso: cpu.porcentajeUso },
-      ram: { timestamp, total: ram.total, libre: ram.libre, uso: ram.uso, porcentaje_uso: ram.porcentajeUso },
-      lastUpdated: Date.now()
-    };
+    // Actualizar siempre la caché en la base de datos
+    // Actualizar caché de CPU
+    await pool.execute(
+      'UPDATE metrics_cache SET timestamp = ?, data = ? WHERE id = ?',
+      [timestamp, JSON.stringify({ porcentaje_uso: cpu.porcentajeUso }), 'cpu']
+    );
+
+    // Actualizar caché de RAM
+    await pool.execute(
+      'UPDATE metrics_cache SET timestamp = ?, data = ? WHERE id = ?',
+      [timestamp, JSON.stringify({
+        total: ram.total,
+        libre: ram.libre,
+        uso: ram.uso,
+        porcentaje_uso: ram.porcentajeUso
+      }), 'ram']
+    );
     
-    // Pero solo guardar en la base de datos según la tasa de muestreo
+    // Pero solo guardar en las tablas de métricas según la tasa de muestreo
     if (now - lastSampleTime >= SAMPLE_RATE) {
       lastSampleTime = now;
       
@@ -76,9 +83,9 @@ app.post('/api/data', async (req, res) => {
         [timestamp, ram.total, ram.libre, ram.uso, ram.porcentajeUso]
       );
       
-      console.log(`Métricas guardadas - Timestamp: ${new Date(timestamp * 1000).toISOString()}`);
+      console.log(`Métricas completas guardadas - Timestamp: ${new Date(timestamp * 1000).toISOString()}`);
     } else {
-      console.log(`Métricas recibidas pero no guardadas (actualizada caché)`);
+      console.log(`Solo caché actualizada - Timestamp: ${new Date(timestamp * 1000).toISOString()}`);
     }
     
     res.status(201).json({ message: 'Métricas recibidas correctamente' });
@@ -116,38 +123,27 @@ app.get('/api/metrics/ram', async (req, res) => {
   }
 });
 
-// Endpoint para obtener las métricas más recientes
+// Endpoint para obtener las métricas más recientes - Usando la tabla como caché
 app.get('/api/metrics/latest', async (req, res) => {
   try {
-    // Si la caché es reciente (menos de 2 segundos), usarla
-    if (metricsCache.lastUpdated > 0 && Date.now() - metricsCache.lastUpdated < 2000) {
-      return res.json({
-        cpu: metricsCache.cpu,
-        ram: metricsCache.ram
-      });
-    }
+    // Obtener la caché desde la base de datos
+    const [cpuCache] = await pool.execute('SELECT * FROM metrics_cache WHERE id = ?', ['cpu']);
+    const [ramCache] = await pool.execute('SELECT * FROM metrics_cache WHERE id = ?', ['ram']);
     
-    // Si no hay caché reciente, consultar la base de datos
-    const [cpuRows] = await pool.execute(
-      'SELECT * FROM cpu_metrics ORDER BY timestamp DESC LIMIT 1'
-    );
+    // Preparar respuesta
+    const cpuData = cpuCache.length > 0 ? {
+      timestamp: cpuCache[0].timestamp,
+      ...JSON.parse(cpuCache[0].data)
+    } : null;
     
-    const [ramRows] = await pool.execute(
-      'SELECT * FROM ram_metrics ORDER BY timestamp DESC LIMIT 1'
-    );
-    
-    // Actualizar la caché con los datos de la base de datos
-    if (cpuRows.length > 0 && ramRows.length > 0) {
-      metricsCache = {
-        cpu: cpuRows[0],
-        ram: ramRows[0],
-        lastUpdated: Date.now()
-      };
-    }
+    const ramData = ramCache.length > 0 ? {
+      timestamp: ramCache[0].timestamp,
+      ...JSON.parse(ramCache[0].data)
+    } : null;
     
     res.json({
-      cpu: cpuRows.length > 0 ? cpuRows[0] : null,
-      ram: ramRows.length > 0 ? ramRows[0] : null
+      cpu: cpuData,
+      ram: ramData
     });
   } catch (error) {
     console.error('Error al obtener métricas recientes:', error);
