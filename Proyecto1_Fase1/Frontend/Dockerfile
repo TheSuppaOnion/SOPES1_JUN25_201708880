@@ -6,7 +6,7 @@ WORKDIR /app
 COPY . .
 
 # Inicializar módulo Go y agregar dependencias automáticamente
-RUN go mod init monitor-frontend && \
+RUN go mod init monitor-frontend || true && \
     go get github.com/gofiber/fiber/v2 && \
     go get github.com/gofiber/template/html/v2 && \
     go mod tidy
