@@ -28,16 +28,6 @@ cd "$(dirname "$0")" || {
 echo -e "${YELLOW}Deteniendo contenedores de la aplicación...${NC}"
 docker-compose down -v
 
-# Eliminar todos los contenedores relacionados con stress-test
-echo -e "${YELLOW}Eliminando contenedores de prueba de estrés...${NC}"
-containers=$(docker ps -a --filter name=stress-test -q)
-if [ -n "$containers" ]; then
-    docker rm -f $containers
-    echo -e "${GREEN}Contenedores de prueba de estrés eliminados.${NC}"
-else
-    echo -e "${GREEN}No hay contenedores de prueba de estrés para eliminar.${NC}"
-fi
-
 # Eliminar volúmenes
 echo -e "${YELLOW}Eliminando volúmenes...${NC}"
 docker volume rm proyecto1_fase1_mysql-data 2>/dev/null || true
@@ -59,7 +49,7 @@ read -p "¿Deseas eliminar también las imágenes Docker? (s/n): " respuesta
 if [[ $respuesta =~ ^[Ss]$ ]]; then
     echo -e "${YELLOW}Eliminando imágenes Docker...${NC}"
     # Obtener las imágenes relacionadas con el proyecto
-    images=$(docker images | grep "proyecto1_fase1" | awk '{print $3}')
+    images=$(docker images | grep "bismarckr/monitor" | awk '{print $3}')
     if [ -n "$images" ]; then
         docker rmi -f $images
         echo -e "${GREEN}Imágenes Docker eliminadas.${NC}"
