@@ -36,6 +36,34 @@ async function checkDBConnection() {
   }
 }
 
+// Inicializar la tabla de caché si es necesario
+async function initCacheTable() {
+  try {
+    // Verificar si existen registros para CPU y RAM en la tabla de caché
+    const [cpuCache] = await pool.execute('SELECT * FROM metrics_cache WHERE id = ?', ['cpu']);
+    if (cpuCache.length === 0) {
+      await pool.execute(
+        'INSERT INTO metrics_cache (id, timestamp, data) VALUES (?, ?, ?)',
+        ['cpu', 0, JSON.stringify({ porcentaje_uso: 0 })]
+      );
+      console.log('Inicializado registro de caché para CPU');
+    }
+
+    const [ramCache] = await pool.execute('SELECT * FROM metrics_cache WHERE id = ?', ['ram']);
+    if (ramCache.length === 0) {
+      await pool.execute(
+        'INSERT INTO metrics_cache (id, timestamp, data) VALUES (?, ?, ?)',
+        ['ram', 0, JSON.stringify({ total: 0, libre: 0, uso: 0, porcentaje_uso: 0 })]
+      );
+      console.log('Inicializado registro de caché para RAM');
+    }
+
+    console.log('Tabla de caché verificada correctamente');
+  } catch (error) {
+    console.error('Error al inicializar la tabla de caché:', error);
+  }
+}
+
 const SAMPLE_RATE = 2000;
 let lastSampleTime = 0;
 
@@ -49,25 +77,30 @@ app.post('/api/data', async (req, res) => {
       return res.status(400).json({ error: 'Datos incompletos' });
     }
 
-    // Actualizar siempre la caché en la base de datos
-    // Actualizar caché de CPU
-    await pool.execute(
-      'UPDATE metrics_cache SET timestamp = ?, data = ? WHERE id = ?',
-      [timestamp, JSON.stringify({ porcentaje_uso: cpu.porcentajeUso }), 'cpu']
-    );
+    // Actualizar la caché en la base de datos
+    try {
+      // Actualizar caché de CPU
+      await pool.execute(
+        'UPDATE metrics_cache SET timestamp = ?, data = ?, updated_at = NOW() WHERE id = ?',
+        [timestamp, JSON.stringify({ porcentaje_uso: cpu.porcentajeUso }), 'cpu']
+      );
 
-    // Actualizar caché de RAM
-    await pool.execute(
-      'UPDATE metrics_cache SET timestamp = ?, data = ? WHERE id = ?',
-      [timestamp, JSON.stringify({
-        total: ram.total,
-        libre: ram.libre,
-        uso: ram.uso,
-        porcentaje_uso: ram.porcentajeUso
-      }), 'ram']
-    );
+      // Actualizar caché de RAM
+      await pool.execute(
+        'UPDATE metrics_cache SET timestamp = ?, data = ?, updated_at = NOW() WHERE id = ?',
+        [timestamp, JSON.stringify({
+          total: ram.total,
+          libre: ram.libre,
+          uso: ram.uso,
+          porcentaje_uso: ram.porcentajeUso
+        }), 'ram']
+      );
+    } catch (cacheError) {
+      console.error('Error al actualizar la caché:', cacheError);
+      // Continuar con el proceso incluso si la caché falla
+    }
     
-    // Pero solo guardar en las tablas de métricas según la tasa de muestreo
+    // Guardar en las tablas principales según la tasa de muestreo
     if (now - lastSampleTime >= SAMPLE_RATE) {
       lastSampleTime = now;
       
@@ -123,23 +156,74 @@ app.get('/api/metrics/ram', async (req, res) => {
   }
 });
 
-// Endpoint para obtener las métricas más recientes - Usando la tabla como caché
+// Endpoint para obtener las métricas más recientes - usando la tabla como caché
 app.get('/api/metrics/latest', async (req, res) => {
   try {
-    // Obtener la caché desde la base de datos
-    const [cpuCache] = await pool.execute('SELECT * FROM metrics_cache WHERE id = ?', ['cpu']);
-    const [ramCache] = await pool.execute('SELECT * FROM metrics_cache WHERE id = ?', ['ram']);
+    // Obtener datos de caché desde la base de datos
+    const [cpuCache] = await pool.execute(
+      'SELECT timestamp, data, updated_at FROM metrics_cache WHERE id = ?',
+      ['cpu']
+    );
     
-    // Preparar respuesta
-    const cpuData = cpuCache.length > 0 ? {
-      timestamp: cpuCache[0].timestamp,
-      ...JSON.parse(cpuCache[0].data)
-    } : null;
-    
-    const ramData = ramCache.length > 0 ? {
-      timestamp: ramCache[0].timestamp,
-      ...JSON.parse(ramCache[0].data)
-    } : null;
+    const [ramCache] = await pool.execute(
+      'SELECT timestamp, data, updated_at FROM metrics_cache WHERE id = ?',
+      ['ram']
+    );
+
+    // Verificar si la caché es reciente (menos de 2 segundos)
+    const now = Date.now();
+    const isCacheRecent = cpuCache.length > 0 && 
+                          now - new Date(cpuCache[0].updated_at).getTime() < 2000;
+
+    let cpuData, ramData;
+
+    if (isCacheRecent) {
+      // Usar datos de la caché
+      console.log('Usando datos de caché');
+      cpuData = cpuCache.length > 0 ? {
+        timestamp: cpuCache[0].timestamp,
+        ...JSON.parse(cpuCache[0].data)
+      } : null;
+      
+      ramData = ramCache.length > 0 ? {
+        timestamp: ramCache[0].timestamp,
+        ...JSON.parse(ramCache[0].data)
+      } : null;
+    } else {
+      // Si la caché no es reciente, obtener datos de las tablas principales
+      console.log('Caché no reciente, consultando tablas principales');
+      
+      const [cpuRows] = await pool.execute(
+        'SELECT * FROM cpu_metrics ORDER BY timestamp DESC LIMIT 1'
+      );
+      
+      const [ramRows] = await pool.execute(
+        'SELECT * FROM ram_metrics ORDER BY timestamp DESC LIMIT 1'
+      );
+      
+      cpuData = cpuRows.length > 0 ? cpuRows[0] : null;
+      ramData = ramRows.length > 0 ? ramRows[0] : null;
+
+      // Actualizar la caché con estos datos
+      if (cpuData) {
+        await pool.execute(
+          'UPDATE metrics_cache SET timestamp = ?, data = ?, updated_at = NOW() WHERE id = ?',
+          [cpuData.timestamp, JSON.stringify({ porcentaje_uso: cpuData.porcentaje_uso }), 'cpu']
+        );
+      }
+
+      if (ramData) {
+        await pool.execute(
+          'UPDATE metrics_cache SET timestamp = ?, data = ?, updated_at = NOW() WHERE id = ?',
+          [ramData.timestamp, JSON.stringify({
+            total: ramData.total,
+            libre: ramData.libre,
+            uso: ramData.uso,
+            porcentaje_uso: ramData.porcentaje_uso
+          }), 'ram']
+        );
+      }
+    }
     
     res.json({
       cpu: cpuData,
@@ -151,14 +235,20 @@ app.get('/api/metrics/latest', async (req, res) => {
   }
 });
 
-// Verificar conexión a la base de datos antes de iniciar el servidor
+// Verificar conexión a la base de datos y inicializar caché antes de iniciar el servidor
 checkDBConnection()
-  .then(connected => {
+  .then(async (connected) => {
     if (connected) {
+      // Inicializar la tabla de caché
+      await initCacheTable();
+      
       app.listen(PORT, () => {
         console.log(`API ejecutándose en http://localhost:${PORT}`);
       });
     } else {
       console.error('No se pudo iniciar el servidor debido a problemas con la base de datos');
     }
+  })
+  .catch(error => {
+    console.error('Error al inicializar la API:', error);
   });
