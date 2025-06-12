@@ -39,6 +39,7 @@ services:
         condition: service_healthy
     networks:
       - monitor-network
+    image: bismarckr/api-monitoreo:latest
 
   agente:
     build: 
@@ -52,6 +53,7 @@ services:
     network_mode: "host"
     volumes:
       - /proc:/host/proc:ro
+    image: bismarckr/agente-monitoreo:latest
 
   frontend:
     build: 
@@ -64,6 +66,7 @@ services:
       - API_URL=http://localhost:3000
     networks:
       - monitor-network
+    image: bismarckr/frontend-monitoreo:latest
 
 networks:
   monitor-network:
