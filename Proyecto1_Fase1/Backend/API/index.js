@@ -42,6 +42,9 @@ async function checkDBConnection() {
   }
 }
 
+const SAMPLE_RATE = 2000;
+let lastSampleTime = 0;
+
 // Endpoint para recibir métricas del agente Go
 app.post('/api/data', async (req, res) => {
   try {
@@ -57,19 +60,26 @@ app.post('/api/data', async (req, res) => {
       lastUpdated: Date.now()
     };
     
-    // Guardar datos de CPU
-    await pool.execute(
-      'INSERT INTO cpu_metrics (timestamp, porcentaje_uso) VALUES (?, ?)',
-      [timestamp, cpu.porcentajeUso]
-    );
-    
-    // Guardar datos de RAM
-    await pool.execute(
-      'INSERT INTO ram_metrics (timestamp, total, libre, uso, porcentaje_uso) VALUES (?, ?, ?, ?, ?)',
-      [timestamp, ram.total, ram.libre, ram.uso, ram.porcentajeUso]
-    );
-    
-    console.log(`Métricas recibidas - Timestamp: ${new Date(timestamp * 1000).toISOString()}`);
+    // Pero solo guardar en la base de datos según la tasa de muestreo
+    if (now - lastSampleTime >= SAMPLE_RATE) {
+      lastSampleTime = now;
+      
+      // Guardar datos de CPU
+      await pool.execute(
+        'INSERT INTO cpu_metrics (timestamp, porcentaje_uso) VALUES (?, ?)',
+        [timestamp, cpu.porcentajeUso]
+      );
+      
+      // Guardar datos de RAM
+      await pool.execute(
+        'INSERT INTO ram_metrics (timestamp, total, libre, uso, porcentaje_uso) VALUES (?, ?, ?, ?, ?)',
+        [timestamp, ram.total, ram.libre, ram.uso, ram.porcentajeUso]
+      );
+      
+      console.log(`Métricas guardadas - Timestamp: ${new Date(timestamp * 1000).toISOString()}`);
+    } else {
+      console.log(`Métricas recibidas pero no guardadas (actualizada caché)`);
+    }
     
     res.status(201).json({ message: 'Métricas recibidas correctamente' });
   } catch (error) {
