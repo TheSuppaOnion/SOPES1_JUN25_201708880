@@ -51,9 +51,9 @@ cd "$(dirname "$0")" || {
 }
 
 # Definir las imágenes de DockerHub
-api_image="bismarckr/api-monitoreo:latest"
-agente_image="bismarckr/agente-monitoreo:latest"
-frontend_image="bismarckr/frontend-monitoreo:latest"
+api_image="bismarckr/monitor-api:latest"
+agente_image="bismarckr/monitor-agente:latest"
+frontend_image="bismarckr/monitor-frontend:latest"
 
 # Función para verificar si una imagen existe en DockerHub
 check_dockerhub_image() {
