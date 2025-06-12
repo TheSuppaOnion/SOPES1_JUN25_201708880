@@ -47,7 +47,7 @@ services:
       - api
     environment:
       - API_URL=http://localhost:3000/api/data
-      - POLL_INTERVAL=5s
+      - POLL_INTERVAL=500ms
     privileged: true
     network_mode: "host"
     volumes:

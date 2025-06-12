@@ -262,13 +262,13 @@
         // Actualizar gráfica de RAM con nuevos datos
         function updateRamChart(ramData) {
             if (!ramData) return;
-            
+
             const uso = ramData.porcentaje_uso || ramData.porcentajeUso;
             const libre = 100 - uso;
-            
+
             ramChart.data.datasets[0].data = [uso, libre];
             ramChart.update();
-            
+
             document.getElementById('ram-details').innerHTML = `
                 <p>Memoria total: <strong>${formatKB(ramData.total)}</strong></p>
                 <p>Memoria en uso: <strong>${formatKB(ramData.uso)} (${uso}%)</strong></p>
@@ -314,9 +314,9 @@
             initCpuChart();
             initRamChart();
             
-            // Obtener datos inmediatamente y luego cada 5 segundos
+            // Obtener datos
             fetchLatestMetrics();
-            setInterval(fetchLatestMetrics, 5000);
+            setInterval(fetchLatestMetrics, 1000);
         }
         
         // Iniciar cuando se cargue la página

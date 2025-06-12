@@ -4,6 +4,12 @@ const mysql = require('mysql2/promise');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+let metricsCache = {
+  cpu: null,
+  ram: null,
+  lastUpdated: 0
+};
+
 // Configuración de middleware
 app.use(cors());
 app.use(express.json());
@@ -44,6 +50,12 @@ app.post('/api/data', async (req, res) => {
     if (!timestamp || !cpu || !ram) {
       return res.status(400).json({ error: 'Datos incompletos' });
     }
+
+     metricsCache = {
+      cpu: { timestamp, porcentaje_uso: cpu.porcentajeUso },
+      ram: { timestamp, total: ram.total, libre: ram.libre, uso: ram.uso, porcentaje_uso: ram.porcentajeUso },
+      lastUpdated: Date.now()
+    };
     
     // Guardar datos de CPU
     await pool.execute(
@@ -97,6 +109,15 @@ app.get('/api/metrics/ram', async (req, res) => {
 // Endpoint para obtener las métricas más recientes
 app.get('/api/metrics/latest', async (req, res) => {
   try {
+    // Si la caché es reciente (menos de 2 segundos), usarla
+    if (metricsCache.lastUpdated > 0 && Date.now() - metricsCache.lastUpdated < 2000) {
+      return res.json({
+        cpu: metricsCache.cpu,
+        ram: metricsCache.ram
+      });
+    }
+    
+    // Si no hay caché reciente, consultar la base de datos
     const [cpuRows] = await pool.execute(
       'SELECT * FROM cpu_metrics ORDER BY timestamp DESC LIMIT 1'
     );
@@ -104,6 +125,15 @@ app.get('/api/metrics/latest', async (req, res) => {
     const [ramRows] = await pool.execute(
       'SELECT * FROM ram_metrics ORDER BY timestamp DESC LIMIT 1'
     );
+    
+    // Actualizar la caché con los datos de la base de datos
+    if (cpuRows.length > 0 && ramRows.length > 0) {
+      metricsCache = {
+        cpu: cpuRows[0],
+        ram: ramRows[0],
+        lastUpdated: Date.now()
+      };
+    }
     
     res.json({
       cpu: cpuRows.length > 0 ? cpuRows[0] : null,

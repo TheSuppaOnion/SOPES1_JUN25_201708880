@@ -68,7 +68,7 @@ func main() {
 
     // Obtener intervalo de polling desde variables de entorno o usar valor predeterminado
     intervalStr := os.Getenv("POLL_INTERVAL")
-    interval := 1 * time.Second // Valor predeterminado: 5 segundos
+    interval := 500 * time.Millisecond
     if intervalStr != "" {
         if parsedInterval, err := time.ParseDuration(intervalStr); err == nil {
             interval = parsedInterval
