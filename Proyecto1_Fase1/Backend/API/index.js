@@ -180,14 +180,29 @@ app.get('/api/metrics/latest', async (req, res) => {
     if (isCacheRecent) {
       // Usar datos de la caché
       console.log('Usando datos de caché');
+      // Función segura para analizar JSON
+      const safeParseJSON = (data) => {
+        if (typeof data === 'object' && data !== null) {
+          return data;  // Ya es un objeto
+        }
+        try {
+          return JSON.parse(data);
+        } catch (e) {
+          console.error('Error al analizar JSON:', e);
+          return {};  // Devolver objeto vacío en caso de error
+        }
+      };
+      
+      // Obtener datos de CPU de la caché
       cpuData = cpuCache.length > 0 ? {
         timestamp: cpuCache[0].timestamp,
-        ...JSON.parse(cpuCache[0].data)
+        ...safeParseJSON(cpuCache[0].data)
       } : null;
       
+      // Obtener datos de RAM de la caché
       ramData = ramCache.length > 0 ? {
         timestamp: ramCache[0].timestamp,
-        ...JSON.parse(ramCache[0].data)
+        ...safeParseJSON(ramCache[0].data)
       } : null;
     } else {
       // Si la caché no es reciente, obtener datos de las tablas principales
