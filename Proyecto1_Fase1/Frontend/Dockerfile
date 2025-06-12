@@ -2,12 +2,14 @@ FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
-# Copiar y descargar dependencias
-COPY go.mod go.sum* ./
-RUN go mod download
-
 # Copiar el código fuente
 COPY . .
+
+# Inicializar módulo Go y agregar dependencias automáticamente
+RUN go mod init monitor-frontend && \
+    go get github.com/gofiber/fiber/v2 && \
+    go get github.com/gofiber/template/html/v2 && \
+    go mod tidy
 
 # Compilar la aplicación
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/monitor-frontend

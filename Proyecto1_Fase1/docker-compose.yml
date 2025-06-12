@@ -8,7 +8,7 @@ services:
       - "3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
-      - ./Backend/API/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./Backend/BD/init.sql:/docker-entrypoint-initdb.d/init.sql
     environment:
       - MYSQL_ROOT_PASSWORD=root
       - MYSQL_DATABASE=monitoring
@@ -17,6 +17,11 @@ services:
     networks:
       - monitor-network
     restart: always
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   api:
     build: 
@@ -30,7 +35,8 @@ services:
       - DB_PASSWORD=monitor123
       - DB_NAME=monitoring
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     networks:
       - monitor-network
 

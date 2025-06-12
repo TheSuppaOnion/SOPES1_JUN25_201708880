@@ -2,29 +2,27 @@ FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
-# Copiar el módulo go y descargar dependencias
-COPY go.mod ./
-RUN go mod download
-
 # Copiar el código fuente
-COPY *.go ./
+COPY . .
 
-# Compilar la aplicación
-RUN CGO_ENABLED=0 GOOS=linux go build -o /agente-de-monitor
+# Inicializar el módulo Go si es necesario y compilar
+RUN go mod init agente-monitor || true
+RUN go mod tidy
+RUN CGO_ENABLED=0 GOOS=linux go build -o /agente-de-monitor agente-de-monitor.go
 
 # Crear una imagen mínima
 FROM alpine:3.15
 
 WORKDIR /
 
-# Instalar dependencias necesarias para acceder a /proc
+# Instalar dependencias necesarias
 RUN apk --no-cache add ca-certificates
 
 # Copiar el ejecutable compilado
 COPY --from=builder /agente-de-monitor /agente-de-monitor
 
-# Variables de entorno
-ENV API_URL=http://nodejs-api:3000/api/data
+# Variables de entorno (se sobrescribirán por docker-compose)
+ENV API_URL=http://api:3000/api/data
 ENV POLL_INTERVAL=5s
 
 # Ejecutar el agente
