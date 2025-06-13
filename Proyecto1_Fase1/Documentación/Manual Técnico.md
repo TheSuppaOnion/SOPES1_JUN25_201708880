@@ -214,7 +214,7 @@ procesarMetricas -> envía a API
 - Actualización dinámica de datos
 
 ## Infraestructura Docker
-Todo el proyecto se encuentra dockerizado, en cada una de las carpetas se encuentra un dockerfile correspondiente el cual tiene las instrucciones especificas para construir cada uno de los modulos de este proyecto, todo utiliza la red que maneja y crea docker por defecto a excepcion del agente de monitor o recolector como aparece en el enunciado, esto se hizo para poder acceder a los modulos de kernel en la carpeta /proc, de lo contrario no se podria ya que docker por defecto evita que se pueedan acceder a carpetas de la maquina host, mucho menos carpetas del sistema operativo como /proc.
+Todo el proyecto se encuentra dockerizado, se utiliza un docker-compose.yml para buildear o buscar las imagenes en dockerhub, el script de run.sh se encarga de buscar y preguntar al usuario que es lo que deasea, en cada una de las carpetas se encuentra un dockerfile correspondiente el cual tiene las instrucciones especificas para construir cada uno de los modulos de este proyecto, todo utiliza la red que maneja y crea docker por defecto a excepcion del agente de monitor o recolector como aparece en el enunciado, esto se hizo para poder acceder a los modulos de kernel en la carpeta /proc, de lo contrario no se podria ya que docker por defecto evita que se pueedan acceder a carpetas de la maquina host, mucho menos carpetas del sistema operativo como /proc. (Existe un archivo "dummy" en la carpeta /Proyecto1_Fase1/Frontend/static/ su función es simplemente dejar que el dockerfile del frontend funcione, se dejo asi por si en un futuro se quieren servir sitios estaticos)
 
 **Archivo**: `docker-compose.yml`  
 **Servicios**:
