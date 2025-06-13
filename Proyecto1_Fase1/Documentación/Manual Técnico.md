@@ -1,0 +1,234 @@
+
+# Manual Técnico - Sistema de Monitoreo de Recursos
+
+**Autor**: Bismarck Romero - 201708880  
+**Versión**: 1.0.0  
+**Fecha**: Junio 2025  
+
+## Requisitos del Sistema
+
+**Software**:
+- Docker >= 20.10
+- Docker Compose >= v2.0
+- Git >= 2.25
+- Paquetes: `build-essential`, `linux-headers-$(uname -r)` , `golang` , `nodejs` , `docker`, `docker-compose`
+
+**Sistema Operativo**:
+- Ubuntu 22.04 LTS
+- Kernel Linux 5.15+
+
+## Descripción General
+
+Sistema de monitoreo en tiempo real para recursos del sistema operativo Linux. Utiliza módulos del kernel para obtener métricas de CPU y RAM, las almacena en una base de datos MySQL con mecanismos de caché para optimizar el rendimiento, y las visualiza mediante gráficos de pastel interactivos en una interfaz web.
+
+## Prerrequisitos
+- **Sistema Operativo:** Ubuntu 22.04 LTS
+- **Versión del Kernel:** Linux 5.15 o superior
+
+## Instrucciones
+
+### Script de Auto Instalación: setup-environment.sh
+Si se desea se puede usar un script para instalar todo lo necesario para correr esta app, recuerda dar permisos con chmod +x setup-environment.sh, pero si prefieres tambien se puede instalar todo manualmente, en la siguiente sección se detalla como.
+
+```bash
+#!/bin/bash
+
+# Actualizar repositorios
+sudo apt update
+
+# Instalar paquetes esenciales
+sudo apt install -y build-essential linux-headers-$(uname -r) curl wget git
+
+# Instalar Go 1.24.4
+wget https://go.dev/dl/go1.24.4.linux-amd64.tar.gz
+sudo rm -rf /usr/local/go
+sudo tar -C /usr/local -xzf go1.24.4.linux-amd64.tar.gz
+echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
+source ~/.profile
+rm go1.24.4.linux-amd64.tar.gz
+echo "Go instalado: $(go version)"
+
+# Instalar Node.js
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+echo "Node.js instalado: $(node -v)"
+echo "NPM instalado: $(npm -v)"
+
+# Instalar Docker y Docker Compose
+sudo apt install -y docker.io docker-compose
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+echo "Docker instalado: $(docker --version)"
+echo "Docker Compose instalado: $(docker-compose --version)"
+
+echo "\nInstalación completada. Cierre la sesión y vuelva a iniciar para aplicar los cambios de grupo Docker."
+echo "Después, ejecute './kernel.sh' para compilar e instalar los módulos del kernel."
+
+```
+
+### Paquetes Requeridos (Instalacion manual)
+- **build-essential** (sin versión especificada): Herramientas esenciales para compilación
+  ```bash
+  sudo apt install build-essential
+  ```
+- **linux-headers** (sin versión especificada): Cabeceras del kernel Linux para compilar módulos
+  ```bash
+  sudo apt install linux-headers-$(uname -r)
+  ```
+- **golang** (1.24.4): Lenguaje de programación Go para el agente de monitoreo
+  ```bash
+  wget https://go.dev/dl/go1.24.4.linux-amd64.tar.gz && sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.24.4.linux-amd64.tar.gz && echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile && source ~/.profile
+  ```
+- **nodejs** (20.x LTS): Entorno de ejecución JavaScript para la API
+  ```bash
+  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt install -y nodejs
+  ```
+- **docker** (20.10+): Plataforma de contenedores para desplegar servicios
+  ```bash
+  sudo apt install docker.io
+  ```
+- **docker-compose** (2.0+): Herramienta para definir aplicaciones multi-contenedor
+  ```bash
+  sudo apt install docker-compose
+  ```
+### Configuración Adicional
+```bash
+sudo systemctl enable --now docker
+```
+```bash
+sudo usermod -aG docker $USER
+```
+```bash
+# Cerrar sesión y volver a iniciar para aplicar los cambios de grupo
+```
+
+### Instalación
+Luego de tener todos los prerequisitos instalados, se puede proceder a la instalación y uso del software.
+1. `git clone https://github.com/username/proyecto1-fase1.git`
+2. `sudo ./kernel.sh`
+3. `./run.sh`
+4. `docker ps`
+5. Acceder a `http://localhost:8080`
+
+### Prueba
+1. `./stress.sh`
+2. Ver métricas subir en la interfaz web
+3. Consultar en la base de datos:  
+```sh
+docker exec -it mysql mysql -umonitor -pmonitor123 monitoring -e 'SELECT * FROM cpu_metrics ORDER BY timestamp DESC LIMIT 5'
+```
+
+### Desinstalación
+1. `./delete.sh`
+2. Confirmar eliminación de imágenes
+3. Verificar con `docker ps`
+
+**Permisos**: Requiere `sudo` para módulos del kernel
+
+## Componentes Principales
+
+### Módulos del Kernel
+
+**Ubicación**: `/Proyecto1_Fase1/Modulos/`  
+**Descripción**: Implementación a nivel de kernel para obtener métricas precisas del sistema.
+
+**Archivos Principales**:
+- `cpu_201708880.c`: Módulo que monitorea el uso de CPU del sistema.  
+  - Implementa cálculo `(100 - idle_delta*100/total_delta)`
+  - Usa `proc_ops` para exponer `/proc/cpu_201708880`
+  - Mantiene estado entre llamadas
+
+- `ram_201708880.c`: Módulo que monitorea el uso de memoria RAM.  
+  - Usa `si_meminfo()`
+  - Calcula memoria disponible = libre + buffers + cached
+  - Datos expuestos en JSON desde `/proc/ram_201708880`
+
+**Comandos**:
+```sh
+cd Modulos/ && make
+sudo insmod cpu_201708880.ko && sudo insmod ram_201708880.ko
+cat /proc/cpu_201708880
+cat /proc/ram_201708880
+```
+
+### Agente de Monitoreo
+
+**Ubicación**: `/Proyecto1_Fase1/Backend/Agente/`  
+**Descripción**: Aplicación en Go que usa concurrencia (Productor-Consumidor) para recolectar métricas.
+
+**Arquitectura**:
+- **Productores**: Goroutines independientes para CPU y RAM
+- **Consumidor**: Procesa datos y los envía a la API
+- **Canales**: Comunicación concurrente eficiente
+
+**Variables de Configuración**:
+- `API_URL`: `http://localhost:3000/api/data`
+- `POLL_INTERVAL`: `2s`
+
+**Comandos clave**:
+```go
+monitorCPU -> lee /proc/cpu_201708880
+monitorRAM -> lee /proc/ram_201708880
+procesarMetricas -> envía a API
+```
+
+### API Backend
+
+**Ubicación**: `/Proyecto1_Fase1/Backend/API/`  
+**Descripción**: API RESTful en Node.js con caché y persistencia MySQL. Se utilizó como caché una tabla de la base de datos para agilizar el proceso de lectura de metricas del CPU y RAM y asi optimizar el consumo de recursos de la web app en funcionamiento.
+
+**Endpoints**:
+- `POST /api/data`: Recibe y almacena métricas
+- `GET /api/metrics/cpu`: Últimas 100 métricas de CPU
+- `GET /api/metrics/ram`: Últimas 100 métricas de RAM
+- `GET /api/metrics/latest`: Métricas más recientes, usa caché
+
+**Variables**:
+- `DB_HOST`: `mysql`
+- `DB_USER`: `monitor`
+- `DB_PASSWORD`: `monitor123`
+- `DB_NAME`: `monitoring`
+- `SAMPLE_RATE`: `2000`
+
+### Base de Datos
+
+**Ubicación**: `/Proyecto1_Fase1/Backend/BD/`  
+**Descripción**: MySQL para persistencia y caché.
+
+**Tablas**:
+- `cpu_metrics`: Registra uso de CPU
+- `ram_metrics`: Uso de RAM, total, libre, en uso
+- `metrics_cache`: Datos recientes, cacheados
+
+**Persistencia**:
+- Volumen `mysql-data` en Docker
+
+### Frontend
+
+**Ubicación**: `/Proyecto1_Fase1/Frontend/`  
+**Descripción**: Interfaz web con Go Fiber y Chart.js
+
+**Características**:
+- Gráficos de pastel en tiempo real (AJAX cada 2s)
+- Visualización responsiva
+- Actualización dinámica de datos
+
+## Infraestructura Docker
+Todo el proyecto se encuentra dockerizado, en cada una de las carpetas se encuentra un dockerfile correspondiente el cual tiene las instrucciones especificas para construir cada uno de los modulos de este proyecto, todo utiliza la red que maneja y crea docker por defecto a excepcion del agente de monitor o recolector como aparece en el enunciado, esto se hizo para poder acceder a los modulos de kernel en la carpeta /proc, de lo contrario no se podria ya que docker por defecto evita que se pueedan acceder a carpetas de la maquina host, mucho menos carpetas del sistema operativo como /proc.
+
+**Archivo**: `docker-compose.yml`  
+**Servicios**:
+- `mysql`: Base de datos
+- `api`: Backend Node.js
+- `agente`: Monitor en Go
+- `frontend`: Visualizador web
+
+**Red**: `monitor-network`  
+**Volumenes**: `mysql-data`
+
+## Scripts Incluidos
+
+- `kernel.sh`: Compila y carga módulos del kernel
+- `run.sh`: Lanza la infraestructura completa
+- `delete.sh`: Elimina contenedores y volúmenes
+- `stress.sh`: Genera carga para probar el sistema
