@@ -62,10 +62,10 @@ check_dockerhub_image() {
     
     # Verificar si podemos hacer pull de la imagen (sin descargarla)
     if docker manifest inspect ${image_name} &>/dev/null; then
-        echo -e "${GREEN}✓ Imagen ${image_name} encontrada en DockerHub.${NC}"
+        echo -e "${GREEN} Imagen ${image_name} encontrada en DockerHub.${NC}"
         return 0
     else
-        echo -e "${RED}✗ Imagen ${image_name} no encontrada en DockerHub.${NC}"
+        echo -e "${RED} Imagen ${image_name} no encontrada en DockerHub.${NC}"
         return 1
     fi
 }
@@ -120,9 +120,9 @@ else
     
     if $api_exists || $agente_exists || $frontend_exists; then
         echo -e "${YELLOW}Algunas imágenes están disponibles:${NC}"
-        $api_exists && echo -e "  ${GREEN}✓ API${NC}" || echo -e "  ${RED}✗ API${NC}"
-        $agente_exists && echo -e "  ${GREEN}✓ Agente${NC}" || echo -e "  ${RED}✗ Agente${NC}"
-        $frontend_exists && echo -e "  ${GREEN}✓ Frontend${NC}" || echo -e "  ${RED}✗ Frontend${NC}"
+        $api_exists && echo -e "  ${GREEN} API${NC}" || echo -e "  ${RED}✗ API${NC}"
+        $agente_exists && echo -e "  ${GREEN} Agente${NC}" || echo -e "  ${RED}✗ Agente${NC}"
+        $frontend_exists && echo -e "  ${GREEN} Frontend${NC}" || echo -e "  ${RED}✗ Frontend${NC}"
         echo
         
         echo -e "${YELLOW}Selecciona una opción:${NC}"
@@ -197,7 +197,7 @@ echo -e "${YELLOW}Verificando el estado de los servicios...${NC}"
 docker-compose ps
 
 echo
-echo -e "${GREEN}✓ Aplicación desplegada correctamente.${NC}"
+echo -e "${GREEN}  Aplicación desplegada correctamente.${NC}"
 echo -e "${GREEN}  Frontend: http://localhost:8080${NC}"
 echo -e "${GREEN}  API: http://localhost:3000${NC}"
 echo

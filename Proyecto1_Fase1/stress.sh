@@ -55,7 +55,6 @@ for i in $(seq 1 $NUM_CONTAINERS); do
     echo -e "   - CPU: $cpu_cores núcleos"
     echo -e "   - Memoria: $memory MB"
 
-    # Corrección: Pasar "stress" como comando y luego los parámetros
     docker run -d \
         --name $container_name \
         --rm \
