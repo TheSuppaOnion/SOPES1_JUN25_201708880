@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Script para desplegar 10 contenedores para estresar CPU y RAM
+# Script optimizado para desplegar contenedores de estrés
 # Autor: Bismarck Romero - 201708880
 # Fecha: Junio 2025
 
@@ -13,7 +13,7 @@ NC='\033[0m' # No Color
 # Número de contenedores a crear
 NUM_CONTAINERS=10
 
-echo -e "${YELLOW}Iniciando prueba de estrés con $NUM_CONTAINERS contenedores...${NC}"
+echo -e "${YELLOW}Iniciando prueba de estrés optimizada con $NUM_CONTAINERS contenedores...${NC}"
 
 # Verificar si Docker está instalado
 if ! command -v docker &> /dev/null; then
@@ -21,40 +21,56 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-# Función para detener todos los contenedores de estrés
+# Función para detener contenedores en paralelo
 stop_stress_containers() {
     echo -e "${YELLOW}Deteniendo contenedores de prueba de estrés...${NC}"
-    for i in $(seq 1 $NUM_CONTAINERS); do
-        container_name="stress-test-$i"
-        if docker ps -a | grep -q $container_name; then
-            docker stop $container_name > /dev/null 2>&1
-            docker rm $container_name > /dev/null 2>&1
-            echo -e "   ${GREEN}Contenedor $container_name detenido y eliminado.${NC}"
-        fi
-    done
+    
+    # Obtener lista de contenedores de estrés que existen
+    containers=$(docker ps -a --filter "name=stress-test-" --format "{{.Names}}" 2>/dev/null)
+    
+    if [ -n "$containers" ]; then
+        # Detener todos en paralelo usando xargs
+        echo "$containers" | xargs -n 1 -P 0 docker stop > /dev/null 2>&1
+        
+        # Eliminar todos en paralelo
+        echo "$containers" | xargs -n 1 -P 0 docker rm > /dev/null 2>&1
+        
+        echo -e "   ${GREEN}Todos los contenedores de estrés han sido detenidos y eliminados.${NC}"
+    else
+        echo -e "   ${YELLOW}No se encontraron contenedores de estrés.${NC}"
+    fi
+}
+
+# Función para limpiar contenedores de estrés con timeout
+force_cleanup() {
+    echo -e "${YELLOW}Forzando limpieza de contenedores...${NC}"
+    docker ps -a --filter "name=stress-test-" -q | xargs -r docker rm -f > /dev/null 2>&1
 }
 
 # Capturar señal de interrupción (Ctrl+C)
-trap 'echo -e "${YELLOW}Interrumpido por el usuario.${NC}"; stop_stress_containers; exit 0' INT
+trap 'echo -e "${YELLOW}Interrumpido por el usuario.${NC}"; force_cleanup; exit 0' INT
 
-# Detener contenedores existentes de pruebas anteriores
-stop_stress_containers
+# Limpieza inicial rápida
+force_cleanup
 
-# Crear y ejecutar los contenedores de estrés
-echo -e "${YELLOW}Creando $NUM_CONTAINERS contenedores de estrés...${NC}"
+# Pre-descargar la imagen si no existe (solo una vez)
+echo -e "${YELLOW}Verificando imagen de estrés...${NC}"
+if ! docker images | grep -q "polinux/stress"; then
+    echo -e "${YELLOW}Descargando imagen polinux/stress...${NC}"
+    docker pull polinux/stress > /dev/null 2>&1
+fi
 
-for i in $(seq 1 $NUM_CONTAINERS); do
-    container_name="stress-test-$i"
+# Crear contenedores en paralelo
+echo -e "${YELLOW}Creando $NUM_CONTAINERS contenedores de estrés en paralelo...${NC}"
 
-    # Calcular valores de estrés diferentes para cada contenedor
-    # para distribuir la carga
-    cpu_cores=$((1 + $i % 4))  # Entre 1 y 4 núcleos
-    memory=$((256 + ($i * 64)))  # Entre 256MB y 896MB
-
-    echo -e "${YELLOW}Iniciando contenedor $container_name:${NC}"
-    echo -e "   - CPU: $cpu_cores núcleos"
-    echo -e "   - Memoria: $memory MB"
-
+# Crear función para ejecutar un contenedor
+run_container() {
+    local i=$1
+    local container_name="stress-test-$i"
+    local cpu_cores=$((1 + $i % 4))
+    local memory=$((256 + ($i * 64)))
+    local timeout=60s # Modificar si se quiere mas o menos tiempo!!!
+    
     docker run -d \
         --name $container_name \
         --rm \
@@ -62,27 +78,55 @@ for i in $(seq 1 $NUM_CONTAINERS); do
         stress --cpu $cpu_cores \
                --vm 1 \
                --vm-bytes ${memory}M \
-               --timeout 300s \
-        > /dev/null
-
+               --timeout ${timeout} \
+        > /dev/null 2>&1
+    
     if [ $? -eq 0 ]; then
-        echo -e "   ${GREEN}Contenedor $container_name iniciado correctamente.${NC}"
+        echo -e "   ${GREEN} Contenedor $container_name (CPU: $cpu_cores, RAM: ${memory}MB)${NC}"
     else
-        echo -e "   ${RED}Error al iniciar el contenedor $container_name.${NC}"
+        echo -e "   ${RED} Error en contenedor $container_name${NC}"
     fi
-done
+}
 
-# Mostrar todos los contenedores en ejecución
-echo -e "${YELLOW}Contenedores de estrés en ejecución:${NC}"
-docker ps | grep "stress-test"
+# Exportar la función para usar con xargs
+export -f run_container
+export GREEN RED YELLOW NC
 
-echo -e "${GREEN}Prueba de estrés iniciada. Los contenedores se ejecutarán durante 1 minuto.${NC}"
-echo -e "${YELLOW}Presiona Ctrl+C para detener la prueba antes de tiempo.${NC}"
+# Ejecutar contenedores en paralelo
+seq 1 $NUM_CONTAINERS | xargs -n 1 -P $NUM_CONTAINERS -I {} bash -c 'run_container {}'
 
-# Esperar a que todos los contenedores terminen (1 minuto = 60 segundos)
-sleep 60
+# Verificar contenedores en ejecución
+echo
+running_containers=$(docker ps --filter "name=stress-test-" --format "{{.Names}}" | wc -l)
+echo -e "${YELLOW}Contenedores de estrés en ejecución: ${GREEN}$running_containers/$NUM_CONTAINERS${NC}"
 
-# Detener todos los contenedores si aún están en ejecución
-stop_stress_containers
+if [ $running_containers -gt 0 ]; then
+    echo -e "${GREEN}Prueba de estrés iniciada. Los contenedores se ejecutarán durante 1 minuto.${NC}"
+    echo -e "${YELLOW}Presiona Ctrl+C para detener la prueba antes de tiempo.${NC}"
+    
+	# Configuración al inicio del script
+	DURATION_SECONDS=60        # Duración total en segundos
+	PROGRESS_INTERVAL=15       # Intervalo de progreso en segundos
+	ITERATIONS=$((DURATION_SECONDS / PROGRESS_INTERVAL))
+
+	# En la función run_container
+	timeout=${DURATION_SECONDS}s
+
+	# En el bucle de monitoreo
+	for i in $(seq 1 $ITERATIONS); do
+	    sleep $PROGRESS_INTERVAL
+	    remaining=$((DURATION_SECONDS - (i * PROGRESS_INTERVAL)))
+	    if [ $remaining -gt 0 ]; then
+		active=$(docker ps --filter "name=stress-test-" -q | wc -l)
+		echo -e "${YELLOW}Tiempo restante: ${remaining}s - Contenedores activos: $active${NC}"
+	    fi
+	done
+else
+    echo -e "${RED}No se pudieron iniciar contenedores de estrés.${NC}"
+    exit 1
+fi
+
+# Limpieza final
+force_cleanup
 
 echo -e "${GREEN}Prueba de estrés completada.${NC}"
