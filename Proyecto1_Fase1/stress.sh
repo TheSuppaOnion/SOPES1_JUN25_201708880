@@ -77,11 +77,11 @@ done
 echo -e "${YELLOW}Contenedores de estrés en ejecución:${NC}"
 docker ps | grep "stress-test"
 
-echo -e "${GREEN}Prueba de estrés iniciada. Los contenedores se ejecutarán durante 5 minutos.${NC}"
+echo -e "${GREEN}Prueba de estrés iniciada. Los contenedores se ejecutarán durante 1 minuto.${NC}"
 echo -e "${YELLOW}Presiona Ctrl+C para detener la prueba antes de tiempo.${NC}"
 
-# Esperar a que todos los contenedores terminen (5 minutos = 300 segundos)
-sleep 300
+# Esperar a que todos los contenedores terminen (1 minuto = 60 segundos)
+sleep 60
 
 # Detener todos los contenedores si aún están en ejecución
 stop_stress_containers
