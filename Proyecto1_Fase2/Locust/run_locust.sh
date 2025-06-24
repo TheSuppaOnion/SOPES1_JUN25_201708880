@@ -5,32 +5,53 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# Verificar que el sistema principal esté ejecutándose
-echo -e "${YELLOW}Verificando que el sistema de monitoreo esté activo...${NC}"
+echo -e "${YELLOW}=== PRUEBA ESPECÍFICA: 300 USUARIOS POR 3 MINUTOS ===${NC}"
 
-# Verificar API
-if curl -s http://localhost:3000/api/metrics/latest > /dev/null; then
-    echo -e "${GREEN}✓ API respondiendo en puerto 3000${NC}"
-else
-    echo -e "${RED}✗ API no responde. Asegúrate de ejecutar primero: ./run.sh${NC}"
+# Verificar que el sistema esté activo
+if ! curl -s http://localhost:3000/api/metrics/complete > /dev/null; then
+    echo -e "${RED} Sistema no responde. Ejecuta primero: ./run.sh${NC}"
     exit 1
 fi
 
-# Verificar Frontend
-if curl -s http://localhost:8080 > /dev/null; then
-    echo -e "${GREEN}✓ Frontend respondiendo en puerto 8080${NC}"
-else
-    echo -e "${RED}✗ Frontend no responde. Asegúrate de ejecutar primero: ./run.sh${NC}"
-    exit 1
-fi
+echo -e "${GREEN} Sistema verificado${NC}"
 
-echo -e "\n${YELLOW}=== INICIANDO LOCUST ===${NC}"
-echo -e "${GREEN}Interfaz web estará disponible en: http://localhost:8089${NC}"
-echo -e "${YELLOW}Configuraciones recomendadas:${NC}"
-echo -e "  • Usuarios normales: 10-50"
-echo -e "  • Spawn rate: 2-5 usuarios/segundo"
-echo -e "  • Para pruebas intensas: 100+ usuarios"
-echo -e "\n${YELLOW}Presiona Ctrl+C para detener${NC}\n"
+# Iniciar contenedores de estrés en background
+echo -e "${YELLOW} Iniciando estrés del sistema...${NC}"
+cd ../..
+./stress.sh &
+STRESS_PID=$!
+cd Proyecto1_Fase2/Locust
 
-# Ejecutar Locust apuntando al frontend (que proxy a la API)
-locust -f locustfile.py --host=http://localhost:8080 --web-host=0.0.0.0 --web-port=8089
+sleep 5  # Dar tiempo a que el estrés inicie
+
+echo -e "${YELLOW} Iniciando Locust con configuración específica:${NC}"
+echo -e "   • 300 usuarios máximo"
+echo -e "   • 1 usuario nuevo por segundo"
+echo -e "   • Duración: 3 minutos"
+echo -e "   • Peticiones cada 1-2 segundos"
+echo -e ""
+
+# Ejecutar Locust con parámetros específicos del enunciado
+locust -f locustfile.py \
+       --host=http://localhost:3000 \
+       --users=300 \
+       --spawn-rate=1 \
+       --run-time=180 \
+       --headless \
+       --html=report_300_users.html \
+       --csv=metrics_300_users
+
+echo -e "\n${GREEN} Prueba completada${NC}"
+echo -e "${YELLOW} Reportes generados:${NC}"
+echo -e "   • report_300_users.html"
+echo -e "   • metrics_300_users_stats.csv"
+echo -e "   • metrics_300_users_failures.csv"
+
+# Detener estrés
+kill $STRESS_PID 2>/dev/null
+echo -e "${GREEN} Estrés del sistema detenido${NC}"
+
+# Mostrar estadísticas finales
+echo -e "\n${YELLOW} Conteo aproximado de registros generados:${NC}"
+RECORDS=$(curl -s "http://localhost:3000/api/metrics/cpu" | jq '. | length' 2>/dev/null || echo "N/A")
+echo -e "   Registros en base de datos: ${GREEN}$RECORDS${NC}"

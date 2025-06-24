@@ -250,6 +250,55 @@ app.get('/api/metrics/latest', async (req, res) => {
   }
 });
 
+// Endpoint para obtener métricas completas de la Fase 2
+app.get('/api/metrics/complete', async (req, res) => {
+    try {
+        // Obtener métricas más recientes de cada tipo
+        const [cpuResults] = await db.execute(
+            'SELECT * FROM cpu_metrics ORDER BY timestamp DESC LIMIT 1'
+        );
+        
+        const [ramResults] = await db.execute(
+            'SELECT * FROM ram_metrics ORDER BY timestamp DESC LIMIT 1'
+        );
+        
+        const [processResults] = await db.execute(
+            'SELECT * FROM process_metrics ORDER BY timestamp DESC LIMIT 1'
+        );
+
+        const cpu = cpuResults[0] || { porcentajeUso: 0 };
+        const ram = ramResults[0] || { total: 0, libre: 0, uso: 0, porcentajeUso: 0 };
+        const processes = processResults[0] || { 
+            procesos_corriendo: 0, 
+            total_processos: 0, 
+            procesos_durmiendo: 0, 
+            procesos_zombie: 0, 
+            procesos_parados: 0 
+        };
+
+        // Formato específico solicitado
+        const response = {
+            "total_ram": Math.floor(ram.total / 1024), // Convertir a MB
+            "ram_libre": ram.libre,
+            "uso_ram": Math.floor(ram.uso / 1024), // Convertir a MB
+            "porcentaje_ram": ram.porcentajeUso,
+            "porcentaje_cpu_uso": cpu.porcentajeUso,
+            "porcentaje_cpu_libre": 100 - cpu.porcentajeUso,
+            "procesos_corriendo": processes.procesos_corriendo,
+            "total_procesos": processes.total_processos,
+            "procesos_durmiendo": processes.procesos_durmiendo,
+            "procesos_zombie": processes.procesos_zombie,
+            "procesos_parados": processes.procesos_parados,
+            "hora": new Date().toISOString().replace('T', ' ').slice(0, 19)
+        };
+
+        res.json(response);
+    } catch (error) {
+        console.error('Error getting complete metrics:', error);
+        res.status(500).json({ error: 'Error retrieving metrics' });
+    }
+});
+
 // Verificar conexión a la base de datos y inicializar caché antes de iniciar el servidor
 checkDBConnection()
   .then(async (connected) => {
