@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./Backend/BD/init.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=monitoring
+      - MYSQL_USER=monitor
+      - MYSQL_PASSWORD=monitor123
+    networks:
+      - monitor-network
+    restart: always
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: 
+      context: ./Backend/API
+    ports:
+      - "3000:3000"
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=monitor
+      - DB_PASSWORD=monitor123
+      - DB_NAME=monitoring
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - monitor-network
+    image: bismarckr/monitor-api:latest
+
+  agente:
+    build: 
+      context: ./Backend/Agente
+    depends_on:
+      - api
+    environment:
+      - API_URL=http://localhost:3000/api/data
+      - POLL_INTERVAL=2s
+    privileged: true
+    network_mode: "host"
+    volumes:
+      - /proc:/host/proc:ro
+    image: bismarckr/monitor-agente:latest
+
+  frontend:
+    build: 
+      context: ./Frontend
+    ports:
+      - "8080:8080"
+    depends_on:
+      - api
+    environment:
+      - API_URL=http://localhost:3000
+    networks:
+      - monitor-network
+    image: bismarckr/monitor-frontend:latest
+
+networks:
+  monitor-network:
+
+volumes:
+  mysql-data:
