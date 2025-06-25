@@ -2,12 +2,11 @@ FROM node:18-alpine AS build
 
 WORKDIR /app
 
-# Copiar package.json primero
+# Copiar archivos de dependencias
 COPY package*.json ./
 
-# Generar package-lock.json si no existe y instalar dependencias
-RUN npm install --package-lock-only && \
-    npm ci --only=production
+# Instalar dependencias
+RUN npm install
 
 # Copiar resto del código
 COPY . .
@@ -21,8 +20,8 @@ FROM nginx:alpine
 # Copiar build de React
 COPY --from=build /app/build /usr/share/nginx/html
 
-# Copiar configuración de Nginx (si existe)
-COPY nginx.conf /etc/nginx/nginx.conf 2>/dev/null || echo "nginx.conf no encontrado, usando configuración por defecto"
+# Copiar configuración de Nginx si existe
+COPY nginx.conf /etc/nginx/nginx.conf 2>/dev/null || echo "Usando configuración Nginx por defecto"
 
 EXPOSE 80
 
