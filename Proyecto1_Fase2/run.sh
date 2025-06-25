@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Script para desplegar los contenedores de la aplicación
+# Script para desplegar la aplicación con Kubernetes
 # Autor: Bismarck Romero - 201708880
-# Fecha: Junio 2025
+# Fecha: Junio 2025 - SO1 Fase 2
 
 # Colores para mensajes
 GREEN='\033[0;32m'
@@ -15,129 +15,100 @@ clear
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${BLUE}║                                                            ║${NC}"
 echo -e "${BLUE}║ ${YELLOW}Sistema de Monitoreo - Bismarck Romero - 201708880${BLUE}        ║${NC}"
+echo -e "${BLUE}║                    ${YELLOW}SO1 FASE 2 - KUBERNETES${BLUE}                    ║${NC}"
 echo -e "${BLUE}║                                                            ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
 echo
 
-# Función para mostrar menú
-show_menu() {
-    echo -e "${YELLOW}Selecciona el modo de despliegue:${NC}"
-    echo -e "1) Docker Compose (desarrollo local)"
-    echo -e "2) Kubernetes con Minikube (pruebas)"
-    echo -e "3) Salir"
-    echo
-}
+echo -e "${YELLOW}=== DESPLEGANDO SISTEMA DE MONITOREO CON KUBERNETES ===${NC}"
+echo
 
-# Función para Docker Compose (tu código actual)
-deploy_docker_compose() {
-    echo -e "${YELLOW}=== DESPLIEGUE CON DOCKER COMPOSE ===${NC}"
-    
-    # Tu código actual de docker-compose aquí...
-    # (todo el código existente de verificación de módulos, imágenes, etc.)
-    
-    # Verificar si Docker y Docker Compose están instalados
-    if ! command -v docker &> /dev/null; then
-        echo -e "${RED}Error: Docker no está instalado.${NC}"
-        exit 1
-    fi
+# Verificar si Docker está instalado
+if ! command -v docker &> /dev/null; then
+    echo -e "${RED}Error: Docker no está instalado.${NC}"
+    echo -e "${YELLOW}Instale Docker: sudo apt install docker.io${NC}"
+    exit 1
+fi
 
-    if ! command -v docker-compose &> /dev/null; then
-        echo -e "${RED}Error: Docker Compose no está instalado.${NC}"
-        exit 1
-    fi
-
-    # Verificar módulos del kernel
-    if ! lsmod | grep -q "cpu_201708880" || ! lsmod | grep -q "ram_201708880"; then
-        echo -e "${YELLOW}Los módulos del kernel no están cargados.${NC}"
-        echo -e "${YELLOW}Ejecutando script de instalación de módulos...${NC}"
-        sudo ./kernel.sh
-        if [ $? -ne 0 ]; then
-            echo -e "${RED}Error al cargar los módulos del kernel.${NC}"
-            exit 1
-        fi
-    fi
-
-    # Navegar al directorio del proyecto
-    cd "$(dirname "$0")" || {
-        echo -e "${RED}No se pudo acceder al directorio del proyecto.${NC}"
-        exit 1
-    }
-
-    # Resto de tu lógica actual...
-    echo -e "${YELLOW}Deteniendo contenedores existentes...${NC}"
-    docker-compose down
-
-    echo -e "${YELLOW}Iniciando servicios...${NC}"
-    docker-compose up -d --build
-
-    echo -e "${GREEN}Aplicación desplegada correctamente.${NC}"
-    echo -e "${GREEN}Frontend: http://localhost:8080${NC}"
-    echo -e "${GREEN}API: http://localhost:3000${NC}"
-}
-
-# Función para Kubernetes
-deploy_kubernetes() {
-    echo -e "${YELLOW}=== DESPLIEGUE CON KUBERNETES ===${NC}"
-    
-    # Verificar si minikube está instalado
-    if ! command -v minikube &> /dev/null; then
-        echo -e "${RED}Minikube no está instalado.${NC}"
-        echo -e "${YELLOW}Ejecutando configuración de Minikube...${NC}"
-        ./k8s/scripts/setup-minikube.sh
-        if [ $? -ne 0 ]; then
-            echo -e "${RED}Error al configurar Minikube.${NC}"
-            exit 1
-        fi
-    fi
-
-    # Verificar si minikube está ejecutándose
-    if ! minikube status &> /dev/null; then
-        echo -e "${YELLOW}Iniciando Minikube...${NC}"
-        minikube start --driver=docker --memory=4096 --cpus=2
-    fi
-
-    # Construir imágenes
-    echo -e "${YELLOW}Construyendo imágenes Docker...${NC}"
-    ./k8s/scripts/build-images.sh
+# Verificar módulos del kernel
+echo -e "${YELLOW}Verificando módulos del kernel...${NC}"
+if ! lsmod | grep -q "cpu_201708880" || ! lsmod | grep -q "ram_201708880" || ! lsmod | grep -q "procesos_201708880"; then
+    echo -e "${YELLOW}Los módulos del kernel no están cargados.${NC}"
+    echo -e "${YELLOW}Ejecutando script de instalación de módulos...${NC}"
+    sudo ./kernel.sh
     if [ $? -ne 0 ]; then
-        echo -e "${RED}Error al construir imágenes.${NC}"
+        echo -e "${RED}Error al cargar los módulos del kernel.${NC}"
         exit 1
     fi
+    echo -e "${GREEN} Módulos del kernel cargados correctamente${NC}"
+else
+    echo -e "${GREEN} Módulos del kernel ya están cargados${NC}"
+fi
 
-    # Desplegar en Kubernetes
-    echo -e "${YELLOW}Desplegando en Kubernetes...${NC}"
-    ./k8s/scripts/deploy-local.sh
+# Verificar si minikube está instalado
+echo -e "${YELLOW}Verificando Minikube...${NC}"
+if ! command -v minikube &> /dev/null; then
+    echo -e "${RED}Minikube no está instalado.${NC}"
+    echo -e "${YELLOW}Descargando e instalando Minikube automáticamente...${NC}"
+    ./k8s/scripts/setup-minikube.sh
     if [ $? -ne 0 ]; then
-        echo -e "${RED}Error al desplegar en Kubernetes.${NC}"
+        echo -e "${RED}Error al instalar y configurar Minikube.${NC}"
         exit 1
     fi
+    echo -e "${GREEN} Minikube instalado correctamente${NC}"
+else
+    echo -e "${GREEN} Minikube ya está instalado${NC}"
+fi
 
-    echo -e "${GREEN}Aplicación desplegada en Kubernetes correctamente.${NC}"
-    echo -e "${YELLOW}Para acceder al frontend:${NC}"
-    echo -e "${GREEN}minikube service frontend-service -n so1_fase2${NC}"
-}
+# Verificar si minikube está ejecutándose
+echo -e "${YELLOW}Verificando estado de Minikube...${NC}"
+if ! minikube status &> /dev/null; then
+    echo -e "${YELLOW}Iniciando Minikube...${NC}"
+    minikube start --driver=docker --memory=4096 --cpus=2
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Error al iniciar Minikube${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN} Minikube iniciado correctamente${NC}"
+else
+    echo -e "${GREEN} Minikube ya está ejecutándose${NC}"
+fi
 
-# Menú principal
-while true; do
-    show_menu
-    read -p "Opción [1-3]: " choice
-    
-    case $choice in
-        1)
-            deploy_docker_compose
-            break
-            ;;
-        2)
-            deploy_kubernetes
-            break
-            ;;
-        3)
-            echo -e "${YELLOW}Saliendo...${NC}"
-            exit 0
-            ;;
-        *)
-            echo -e "${RED}Opción inválida. Intenta de nuevo.${NC}"
-            echo
-            ;;
-    esac
-done
+# Construir todas las imágenes
+echo -e "${YELLOW}Construyendo imágenes Docker para Kubernetes...${NC}"
+./k8s/scripts/build-images.sh
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Error al construir imágenes.${NC}"
+    exit 1
+fi
+
+# Desplegar en Kubernetes
+echo -e "${YELLOW}Desplegando aplicación en Kubernetes...${NC}"
+./k8s/scripts/deploy-local.sh
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Error al desplegar en Kubernetes.${NC}"
+    exit 1
+fi
+
+echo
+echo -e "${GREEN} APLICACIÓN DESPLEGADA EXITOSAMENTE EN KUBERNETES 🎉${NC}"
+echo
+echo -e "${YELLOW} INFORMACIÓN DE ACCESO:${NC}"
+echo -e "${GREEN}Para acceder al frontend:${NC}"
+echo -e "   ${BLUE}minikube service frontend-service -n so1_fase2${NC}"
+echo
+echo -e "${GREEN}Para acceder a las APIs directamente:${NC}"
+echo -e "   ${BLUE}minikube service api-nodejs-service -n so1_fase2${NC}  (API Node.js)"
+echo -e "   ${BLUE}minikube service api-python-service -n so1_fase2${NC}  (API Python)"
+echo -e "   ${BLUE}minikube service websocket-api-service -n so1_fase2${NC}  (WebSocket)"
+echo
+echo -e "${GREEN}Para ver el estado de los pods:${NC}"
+echo -e "   ${BLUE}kubectl get pods -n so1_fase2${NC}"
+echo
+echo -e "${GREEN}Para ver logs:${NC}"
+echo -e "   ${BLUE}kubectl logs -f deployment/api-nodejs -n so1_fase2${NC}"
+echo -e "   ${BLUE}kubectl logs -f deployment/api-python -n so1_fase2${NC}"
+echo
+echo -e "${YELLOW}Para limpiar todo cuando termines:${NC}"
+echo -e "   ${BLUE}./delete.sh${NC}"
+echo

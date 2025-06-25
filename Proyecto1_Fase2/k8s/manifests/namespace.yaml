@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: so1-fase2
+  name: so1_fase2
   labels:
     name: so1_fase2
     project: sistemas-operativos-1
