@@ -24,6 +24,18 @@ CREATE TABLE IF NOT EXISTS ram_metrics (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Tabla para métricas de procesos
+CREATE TABLE IF NOT EXISTS procesos_metrics (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    timestamp BIGINT NOT NULL,
+    procesos_corriendo INT NOT NULL,
+    total_processos INT NOT NULL,
+    procesos_durmiendo INT NOT NULL,
+    procesos_zombie INT NOT NULL,
+    procesos_parados INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Tabla para caché de métricas más recientes
 CREATE TABLE IF NOT EXISTS metrics_cache (
     id VARCHAR(20) PRIMARY KEY,
@@ -35,6 +47,7 @@ CREATE TABLE IF NOT EXISTS metrics_cache (
 -- Crear índices para mejorar el rendimiento
 CREATE INDEX idx_cpu_timestamp ON cpu_metrics(timestamp);
 CREATE INDEX idx_ram_timestamp ON ram_metrics(timestamp);
+CREATE INDEX idx_procesos_timestamp ON procesos_metrics(timestamp);
 CREATE INDEX idx_metrics_cache_updated ON metrics_cache(updated_at);
 
 -- Añadir usuario con permisos solo para esta base de datos

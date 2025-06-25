@@ -24,11 +24,20 @@ type RAMMetric struct {
     PorcentajeUso int64 `json:"porcentajeUso"`
 }
 
+type Procesos struct {
+    ProcesosCorriendo  int `json:"procesos_corriendo"`
+    TotalProcesos     int `json:"total_processos"`
+    ProcesosDurmiendo int `json:"procesos_durmiendo"`
+    ProcesosZombie    int `json:"procesos_zombie"`
+    ProcesosParados   int `json:"procesos_parados"`
+}
+
 // MetricsPayload es la estructura que se enviará a la API
 type MetricsPayload struct {
     Timestamp int64      `json:"timestamp"`
     CPU       *CPUMetric `json:"cpu"`
     RAM       *RAMMetric `json:"ram"`
+    Procesos  *Procesos `json:"procesos"`
 }
 
 // readProcFile lee un archivo en /proc y devuelve su contenido
@@ -121,14 +130,47 @@ func monitorRAM(ramPath string, interval time.Duration, ramChan chan<- *RAMMetri
     }
 }
 
-// procesarMetricas recibe métricas de CPU y RAM y las envía a la API
-func procesarMetricas(apiURL string, interval time.Duration, cpuChan <-chan *CPUMetric, ramChan <-chan *RAMMetric, wg *sync.WaitGroup) {
+// monitorProcesos monitorea los procesos y envía métricas al canal
+func monitorProcesos(procesosPath string, interval time.Duration, procesosChan chan<- *Procesos, wg *sync.WaitGroup) {
+    defer wg.Done()
+    log.Printf("Iniciando monitoreo de procesos desde %s cada %v", procesosPath, interval)
+    
+    for {
+        // Recolectar métricas de procesos
+        procesosData, err := readProcFile(procesosPath)
+        if err != nil {
+            log.Printf("Error al leer métricas de procesos: %v", err)
+            time.Sleep(interval)
+            continue
+        }
+
+        var procesosMetric Procesos
+        if err := json.Unmarshal(procesosData, &procesosMetric); err != nil {
+            log.Printf("Error al parsear métricas de procesos: %v", err)
+            time.Sleep(interval)
+            continue
+        }
+
+        // Enviar métricas al canal
+        log.Printf("Métrica de procesos recolectada: Corriendo: %d, Total: %d, Durmiendo: %d, Zombie: %d, Parados: %d", 
+                  procesosMetric.ProcesosCorriendo, procesosMetric.TotalProcesos, 
+                  procesosMetric.ProcesosDurmiendo, procesosMetric.ProcesosZombie, procesosMetric.ProcesosParados)
+        procesosChan <- &procesosMetric
+        
+        // Esperar hasta el próximo intervalo
+        time.Sleep(interval)
+    }
+}
+
+// procesarMetricas recibe métricas de CPU, RAM, Procesos y las envía a la API
+func procesarMetricas(apiURL string, interval time.Duration, cpuChan <-chan *CPUMetric, ramChan <-chan *RAMMetric, procesosChan <-chan *Procesos, wg *sync.WaitGroup) {
     defer wg.Done()
     log.Printf("Iniciando procesamiento de métricas para enviar a %s cada %v", apiURL, interval)
     
     // Variables para almacenar las métricas más recientes
     var lastCPU *CPUMetric
     var lastRAM *RAMMetric
+    var lastProcesos *Procesos
     
     // Ticker para enviar métricas a intervalos regulares
     ticker := time.NewTicker(interval)
@@ -142,24 +184,31 @@ func procesarMetricas(apiURL string, interval time.Duration, cpuChan <-chan *CPU
         case ram := <-ramChan:
             lastRAM = ram
             log.Printf("Recibida nueva métrica de RAM: %d%%", ram.PorcentajeUso)
+
+        case procesos := <-procesosChan:
+            lastProcesos = procesos
+            log.Printf("Recibida nueva métrica de procesos: Total: %d, Corriendo: %d", procesos.TotalProcesos, procesos.ProcesosCorriendo)
             
         case <-ticker.C:
-            // Solo enviar si tenemos métricas de ambos tipos
-            if lastCPU != nil && lastRAM != nil {
+            // CAMBIAR: Validar que tenemos métricas de los TRES tipos
+            if lastCPU != nil && lastRAM != nil && lastProcesos != nil {
                 metrics := MetricsPayload{
                     Timestamp: time.Now().Unix(),
                     CPU:       lastCPU,
                     RAM:       lastRAM,
+                    Procesos:  lastProcesos, // CAMBIAR: Usar puntero directamente, no desreferenciar
                 }
                 
                 // Enviar métricas a la API
                 if err := sendMetricsToAPI(apiURL, metrics); err != nil {
                     log.Printf("Error al enviar métricas a la API: %v", err)
                 } else {
-                    log.Printf("Métricas enviadas exitosamente a la API")
+                    log.Printf("Métricas completas enviadas exitosamente a la API")
                 }
             } else {
-                log.Printf("Esperando métricas completas antes de enviar...")
+                // CAMBIAR: Mostrar estado de cada métrica
+                log.Printf("Esperando métricas completas antes de enviar... CPU: %v, RAM: %v, Procesos: %v", 
+                          lastCPU != nil, lastRAM != nil, lastProcesos != nil)
             }
         }
     }
@@ -184,25 +233,30 @@ func main() {
     // Rutas a los archivos de métricas
     cpuPath := "/proc/cpu_201708880"
     ramPath := "/proc/ram_201708880"
+    procesosPath := "/proc/procesos_201708880"
 
     log.Printf("Iniciando agente de monitoreo con concurrencia. Enviando métricas a %s cada %v", apiURL, interval)
 
     // Crear canales para comunicación entre goroutines
-    cpuChan := make(chan *CPUMetric, 10) // Buffer para evitar bloqueos
-    ramChan := make(chan *RAMMetric, 10) // Buffer para evitar bloqueos
+    cpuChan := make(chan *CPUMetric, 10)
+    ramChan := make(chan *RAMMetric, 10)
+    procesosChan := make(chan *Procesos, 10)
     
     // WaitGroup para esperar a que todas las goroutines terminen
     var wg sync.WaitGroup
-    wg.Add(3) // 3 goroutines: CPU, RAM y procesamiento
+    wg.Add(4)
     
     // Iniciar goroutine para monitorear CPU
     go monitorCPU(cpuPath, interval/2, cpuChan, &wg)
     
     // Iniciar goroutine para monitorear RAM
     go monitorRAM(ramPath, interval/2, ramChan, &wg)
+
+    // Iniciar goroutine para monitorear procesos
+    go monitorProcesos(procesosPath, interval/2, procesosChan, &wg)
     
     // Iniciar goroutine para procesar y enviar métricas
-    go procesarMetricas(apiURL, interval, cpuChan, ramChan, &wg)
+    go procesarMetricas(apiURL, interval, cpuChan, ramChan, procesosChan, &wg)
     
     // Esperar señales para finalizar el programa
     log.Printf("Agente de monitoreo ejecutándose. Presiona Ctrl+C para detener.")

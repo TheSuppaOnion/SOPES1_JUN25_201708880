@@ -14,16 +14,6 @@ if ! curl -s http://localhost:3000/api/metrics/complete > /dev/null; then
 fi
 
 echo -e "${GREEN} Sistema verificado${NC}"
-
-# Iniciar contenedores de estrés en background
-echo -e "${YELLOW} Iniciando estrés del sistema...${NC}"
-cd ../..
-./stress.sh &
-STRESS_PID=$!
-cd Proyecto1_Fase2/Locust
-
-sleep 5  # Dar tiempo a que el estrés inicie
-
 echo -e "${YELLOW} Iniciando Locust con configuración específica:${NC}"
 echo -e "   • 300 usuarios máximo"
 echo -e "   • 1 usuario nuevo por segundo"

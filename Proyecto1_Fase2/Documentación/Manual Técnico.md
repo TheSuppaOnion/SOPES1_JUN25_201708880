@@ -39,6 +39,19 @@ sudo apt update
 # Instalar paquetes esenciales
 sudo apt install -y build-essential linux-headers-$(uname -r) curl wget git
 
+# Instalar Python 3 y pip (para Locust)
+sudo apt install -y python3 python3-pip python3-venv
+echo "Python instalado: $(python3 --version)"
+echo "Pip instalado: $(pip3 --version)"
+
+# Crear alias para facilitar uso de Python
+echo 'alias python=python3' >> ~/.bashrc
+echo 'alias pip=pip3' >> ~/.bashrc
+
+# Instalar Locust para pruebas de carga
+pip3 install --user locust requests faker
+echo "Locust instalado: $(python3 -m locust --version)"
+
 # Instalar Go 1.24.4
 wget https://go.dev/dl/go1.24.4.linux-amd64.tar.gz
 sudo rm -rf /usr/local/go
@@ -61,8 +74,19 @@ sudo usermod -aG docker $USER
 echo "Docker instalado: $(docker --version)"
 echo "Docker Compose instalado: $(docker-compose --version)"
 
-echo "\nInstalación completada. Cierre la sesión y vuelva a iniciar para aplicar los cambios de grupo Docker."
-echo "Después, ejecute './kernel.sh' para compilar e instalar los módulos del kernel."
+echo -e "\n=== INSTALACIÓN COMPLETADA ==="
+echo "Software instalado:"
+echo " Python 3 y pip"
+echo " Locust (para pruebas de carga)"
+echo " Go 1.24.4"
+echo " Node.js 20.x"
+echo " Docker y Docker Compose"
+echo ""
+echo "IMPORTANTE:"
+echo "1. Cierre la sesión y vuelva a iniciar para aplicar los cambios de grupo Docker"
+echo "2. Ejecute 'source ~/.bashrc' para cargar los alias de Python"
+echo "3. Después, ejecute './kernel.sh' para compilar e instalar los módulos del kernel"
+echo "4. Para pruebas de carga: cd Proyecto1_Fase2/Locust && ./run_locust.sh"
 
 ```
 
@@ -74,6 +98,14 @@ echo "Después, ejecute './kernel.sh' para compilar e instalar los módulos del 
 - **linux-headers** (sin versión especificada): Cabeceras del kernel Linux para compilar módulos
   ```bash
   sudo apt install linux-headers-$(uname -r)
+  ```
+- **python3 y pip3**: Python 3 y gestor de paquetes para Locust
+  ```bash
+  sudo apt install python3 python3-pip python3-venv
+  ```
+- **locust**: Herramienta para pruebas de carga y estrés
+  ```bash
+  pip3 install --user locust requests faker
   ```
 - **golang** (1.24.4): Lenguaje de programación Go para el agente de monitoreo
   ```bash
@@ -117,6 +149,31 @@ Luego de tener todos los prerequisitos instalados, se puede proceder a la instal
 ```sh
 docker exec -it mysql mysql -umonitor -pmonitor123 monitoring -e 'SELECT * FROM cpu_metrics ORDER BY timestamp DESC LIMIT 5'
 ```
+### Pruebas de Carga con Locust
+Para ejecutar pruebas de estrés con múltiples usuarios simulados:
+
+1. **Asegurar que el sistema principal esté ejecutándose**:
+   ```bash
+   ./run.sh
+   ```
+
+2. **Ejecutar pruebas de carga específicas** (300 usuarios por 3 minutos):
+   ```bash
+   cd Proyecto1_Fase2/Locust
+   ./run_locust.sh
+   ```
+
+3. **Verificar resultados**:
+   - Reportes generados: `report_300_users.html`
+   - Métricas: `metrics_300_users_stats.csv`
+   - Fallos: `metrics_300_users_failures.csv`
+
+**Configuración de la prueba**:
+- 300 usuarios simultáneos máximo
+- 1 nuevo usuario por segundo (spawn rate)
+- Duración: 3 minutos (180 segundos)
+- Peticiones cada 1-2 segundos por usuario
+- Incluye estrés del sistema con contenedores Docker
 
 ### Desinstalación
 1. `./delete.sh`
