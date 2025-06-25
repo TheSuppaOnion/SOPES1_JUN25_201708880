@@ -95,19 +95,19 @@ echo -e "${GREEN} APLICACIÓN DESPLEGADA EXITOSAMENTE EN KUBERNETES 🎉${NC}"
 echo
 echo -e "${YELLOW} INFORMACIÓN DE ACCESO:${NC}"
 echo -e "${GREEN}Para acceder al frontend:${NC}"
-echo -e "   ${BLUE}minikube service frontend-service -n so1_fase2${NC}"
+echo -e "   ${BLUE}minikube service frontend-service -n so1-fase2${NC}"
 echo
 echo -e "${GREEN}Para acceder a las APIs directamente:${NC}"
-echo -e "   ${BLUE}minikube service api-nodejs-service -n so1_fase2${NC}  (API Node.js)"
-echo -e "   ${BLUE}minikube service api-python-service -n so1_fase2${NC}  (API Python)"
-echo -e "   ${BLUE}minikube service websocket-api-service -n so1_fase2${NC}  (WebSocket)"
+echo -e "   ${BLUE}minikube service api-nodejs-service -n so1-fase2${NC}  (API Node.js)"
+echo -e "   ${BLUE}minikube service api-python-service -n so1-fase2${NC}  (API Python)"
+echo -e "   ${BLUE}minikube service websocket-api-service -n so1-fase2${NC}  (WebSocket)"
 echo
 echo -e "${GREEN}Para ver el estado de los pods:${NC}"
-echo -e "   ${BLUE}kubectl get pods -n so1_fase2${NC}"
+echo -e "   ${BLUE}kubectl get pods -n so1-fase2${NC}"
 echo
 echo -e "${GREEN}Para ver logs:${NC}"
-echo -e "   ${BLUE}kubectl logs -f deployment/api-nodejs -n so1_fase2${NC}"
-echo -e "   ${BLUE}kubectl logs -f deployment/api-python -n so1_fase2${NC}"
+echo -e "   ${BLUE}kubectl logs -f deployment/api-nodejs -n so1-fase2${NC}"
+echo -e "   ${BLUE}kubectl logs -f deployment/api-python -n so1-fase2${NC}"
 echo
 echo -e "${YELLOW}Para limpiar todo cuando termines:${NC}"
 echo -e "   ${BLUE}./delete.sh${NC}"

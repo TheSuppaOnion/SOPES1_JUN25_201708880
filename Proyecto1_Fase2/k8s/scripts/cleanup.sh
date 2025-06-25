@@ -8,7 +8,7 @@ NC='\033[0m'
 echo -e "${YELLOW}=== LIMPIANDO DESPLIEGUE DE KUBERNETES ===${NC}"
 
 # Eliminar todo el namespace (esto elimina todos los recursos)
-kubectl delete namespace so1_fase2
+kubectl delete namespace so1-fase2
 
 echo -e "${GREEN}Limpieza completada${NC}"
 

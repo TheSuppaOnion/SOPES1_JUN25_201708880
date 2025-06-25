@@ -2,7 +2,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: monitor-ingress
-  namespace: so1_fase2
+  namespace: so1-fase2
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
     nginx.ingress.kubernetes.io/upstream-weight-nodejs: "70"

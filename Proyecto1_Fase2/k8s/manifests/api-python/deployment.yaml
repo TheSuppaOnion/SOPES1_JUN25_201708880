@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: api-python
-  namespace: so1_fase2
+  namespace: so1-fase2
   labels:
     app: api-python
     route: python
@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: api-python
-        image: bismarckr/api-python:latest
+        image: bismarckr/api-python-fase2:latest
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 5000

@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: api-nodejs
-  namespace: so1_fase2
+  namespace: so1-fase2
   labels:
     app: api-nodejs
 spec:
@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: api-nodejs
-        image: bismarckr/monitor-api:latest
+        image: bismarckr/api-nodejs-fase2:latest
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 3000

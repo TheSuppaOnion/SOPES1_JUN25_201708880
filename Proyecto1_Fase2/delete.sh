@@ -15,7 +15,7 @@ echo -e "${YELLOW}============================================================${
 echo
 
 echo -e "${RED}ADVERTENCIA: Esto eliminara TODOS los servicios del proyecto:${NC}"
-echo -e "  - Namespace de Kubernetes (so1_fase2)"
+echo -e "  - Namespace de Kubernetes (so1-fase2)"
 echo -e "  - Todos los pods y servicios"
 echo -e "  - Minikube (sera detenido)"
 echo -e "  - Imagenes Docker del proyecto"
@@ -35,11 +35,11 @@ echo
 # Limpiar Kubernetes
 echo -e "${YELLOW}=== LIMPIANDO KUBERNETES ===${NC}"
 if command -v kubectl &> /dev/null; then
-    echo -e "${YELLOW}Eliminando namespace so1_fase2...${NC}"
-    kubectl delete namespace so1_fase2 2>/dev/null || true
+    echo -e "${YELLOW}Eliminando namespace so1-fase2...${NC}"
+    kubectl delete namespace so1-fase2 2>/dev/null || true
     
     echo -e "${YELLOW}Esperando eliminacion del namespace...${NC}"
-    kubectl wait --for=delete namespace/so1_fase2 --timeout=60s 2>/dev/null || true
+    kubectl wait --for=delete namespace/so1-fase2 --timeout=60s 2>/dev/null || true
     
     echo -e "${GREEN}Namespace eliminado.${NC}"
 else

@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: websocket-api
-  namespace: so1_fase2
+  namespace: so1-fase2
   labels:
     app: websocket-api
 spec:
@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: websocket-api
-        image: bismarckr/websocket-api:latest
+        image: bismarckr/websocket-api-fase2:latest
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 4000

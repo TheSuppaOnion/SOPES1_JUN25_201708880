@@ -2,7 +2,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: api-traffic-split
-  namespace: so1_fase2
+  namespace: so1-fase2
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
     nginx.ingress.kubernetes.io/canary: "true"
@@ -25,7 +25,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: api-main
-  namespace: so1_fase2
+  namespace: so1-fase2
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
 spec:

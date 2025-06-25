@@ -2,13 +2,14 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Copiar package.json y package-lock.json
-COPY package*.json ./
+# Copiar package.json primero
+COPY package.json ./
 
-# Instalar dependencias
-RUN npm ci --only=production
+# Generar package-lock.json si no existe y instalar dependencias
+RUN npm install --package-lock-only && \
+    npm ci --only=production
 
-# Copiar código fuente
+# Copiar resto del código
 COPY . .
 
 # Exponer puerto
@@ -19,8 +20,8 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:4000/health || exit 1
 
 # Usuario no root
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S websocket -u 1001
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S websocket -u 1001
 USER websocket
 
 CMD ["node", "index.js"]

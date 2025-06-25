@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: agente
-  namespace: so1_fase2
+  namespace: so1-fase2
   labels:
     app: agente
 spec:
@@ -18,7 +18,7 @@ spec:
       hostNetwork: true
       containers:
       - name: agente
-        image: bismarckr/agente-monitor:latest
+        image: bismarckr/agente-fase2:latest
         imagePullPolicy: IfNotPresent
         env:
         - name: API_URL
