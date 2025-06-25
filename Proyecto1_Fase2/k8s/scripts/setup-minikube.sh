@@ -7,6 +7,14 @@ NC='\033[0m'
 
 echo -e "${YELLOW}=== CONFIGURANDO MINIKUBE PARA PROYECTO DE MONITOREO ===${NC}"
 
+# Verificar si Docker está funcionando
+echo -e "${YELLOW}Verificando Docker...${NC}"
+if ! docker ps &> /dev/null; then
+    echo -e "${RED}Error: Docker no está funcionando o no tienes permisos.${NC}"
+    echo -e "${YELLOW}Ejecuta: sudo usermod -aG docker $USER && newgrp docker${NC}"
+    exit 1
+fi
+
 # Verificar si minikube está instalado
 if ! command -v minikube &> /dev/null; then
     echo -e "${RED}Minikube no está instalado. Instalando...${NC}"
@@ -22,6 +30,10 @@ if ! command -v kubectl &> /dev/null; then
     sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
     rm kubectl
 fi
+
+# Limpiar cualquier instancia previa problemática
+echo -e "${YELLOW}Limpiando configuración previa de Minikube...${NC}"
+minikube delete &> /dev/null || true
 
 # Iniciar minikube
 echo -e "${YELLOW}Iniciando Minikube...${NC}"

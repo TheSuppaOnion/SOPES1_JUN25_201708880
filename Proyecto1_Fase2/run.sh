@@ -74,6 +74,17 @@ else
     echo -e "${GREEN} Minikube ya está ejecutándose${NC}"
 fi
 
+# Verificar conectividad kubectl
+echo -e "${YELLOW}Verificando conectividad con Kubernetes...${NC}"
+kubectl config use-context minikube
+kubectl get nodes &> /dev/null
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Error: kubectl no puede conectarse al cluster. Reiniciando Minikube...${NC}"
+    minikube delete
+    minikube start --driver=docker --memory=4096 --cpus=2 --force
+    kubectl config use-context minikube
+fi
+
 # Función para verificar y generar estructura React
 setup_react_structure() {
     echo -e "${YELLOW}Verificando estructura del proyecto React...${NC}"
@@ -115,9 +126,9 @@ EOF
 }
 EOF
         
-        echo -e "${GREEN} ✓ Estructura React generada automáticamente${NC}"
+        echo -e "${GREEN}  Estructura React generada automáticamente${NC}"
     else
-        echo -e "${GREEN} ✓ Estructura React ya existe${NC}"
+        echo -e "${GREEN}  Estructura React ya existe${NC}"
     fi
     
     # Verificar src/index.js

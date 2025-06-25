@@ -9,8 +9,9 @@ import {
   Title,
   Tooltip,
   Legend,
+  ArcElement,  // ← AÑADIR para gráficas pie
 } from 'chart.js';
-import { Line } from 'react-chartjs-2';
+import { Pie } from 'react-chartjs-2';  // ← CAMBIAR de Line a Pie
 import './App.css';
 import config from './config';
 
@@ -21,76 +22,61 @@ ChartJS.register(
   LineElement,
   Title,
   Tooltip,
-  Legend
+  Legend,
+  ArcElement  // ← AÑADIR
 );
 
 // Usar la configuración dinámica
 const WEBSOCKET_URL = config.WEBSOCKET_URL;
 
 function App() {
-  // ...resto del código sin cambios...
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [processes, setProcesses] = useState([]);
   
-  // Datos para gráficas en tiempo real
+  // Datos para gráficas pie (como Fase 1)
   const [cpuData, setCpuData] = useState({
-    labels: [],
+    labels: ['En Uso', 'Libre'],
     datasets: [{
       label: 'CPU Usage (%)',
-      data: [],
-      borderColor: 'rgb(255, 99, 132)',
-      backgroundColor: 'rgba(255, 99, 132, 0.2)',
-      tension: 0.1
+      data: [0, 100],
+      backgroundColor: ['#FF6384', '#36A2EB'],
+      borderColor: ['#FF6384', '#36A2EB'],
+      borderWidth: 1
     }]
   });
   
   const [ramData, setRamData] = useState({
-    labels: [],
+    labels: ['En Uso', 'Libre'],
     datasets: [{
       label: 'RAM Usage (%)',
-      data: [],
-      borderColor: 'rgb(54, 162, 235)',
-      backgroundColor: 'rgba(54, 162, 235, 0.2)',
-      tension: 0.1
+      data: [0, 100],
+      backgroundColor: ['#FFCE56', '#4BC0C0'],
+      borderColor: ['#FFCE56', '#4BC0C0'],
+      borderWidth: 1
     }]
   });
 
   const socketRef = useRef(null);
-  const maxDataPoints = 20;
 
   const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
       legend: {
-        position: 'top',
+        position: 'bottom',
       },
       title: {
         display: true,
         text: 'Monitoreo en Tiempo Real'
-      }
-    },
-    scales: {
-      y: {
-        beginAtZero: true,
-        max: 100,
-        ticks: {
-          callback: function(value) {
-            return value + '%';
+      },
+      tooltip: {
+        callbacks: {
+          label: function(context) {
+            return `${context.label}: ${context.parsed}%`;
           }
         }
-      },
-      x: {
-        display: true,
-        title: {
-          display: true,
-          text: 'Tiempo'
-        }
       }
-    },
-    animation: {
-      duration: 0
     }
   };
 
@@ -148,45 +134,26 @@ function App() {
   const updateCharts = (data) => {
     if (!data.cpu || !data.ram) return;
 
-    const currentTime = new Date().toLocaleTimeString();
     const cpuUsage = data.cpu.porcentaje_uso || 0;
     const ramUsage = data.ram.porcentaje_uso || 0;
 
-    setCpuData(prevData => {
-      const newLabels = [...prevData.labels, currentTime];
-      const newData = [...prevData.datasets[0].data, cpuUsage];
+    // Actualizar gráfica pie de CPU
+    setCpuData(prevData => ({
+      ...prevData,
+      datasets: [{
+        ...prevData.datasets[0],
+        data: [cpuUsage, 100 - cpuUsage]
+      }]
+    }));
 
-      if (newLabels.length > maxDataPoints) {
-        newLabels.shift();
-        newData.shift();
-      }
-
-      return {
-        labels: newLabels,
-        datasets: [{
-          ...prevData.datasets[0],
-          data: newData
-        }]
-      };
-    });
-
-    setRamData(prevData => {
-      const newLabels = [...prevData.labels, currentTime];
-      const newData = [...prevData.datasets[0].data, ramUsage];
-
-      if (newLabels.length > maxDataPoints) {
-        newLabels.shift();
-        newData.shift();
-      }
-
-      return {
-        labels: newLabels,
-        datasets: [{
-          ...prevData.datasets[0],
-          data: newData
-        }]
-      };
-    });
+    // Actualizar gráfica pie de RAM
+    setRamData(prevData => ({
+      ...prevData,
+      datasets: [{
+        ...prevData.datasets[0],
+        data: [ramUsage, 100 - ramUsage]
+      }]
+    }));
   };
 
   const updateProcessTable = (data) => {
@@ -246,13 +213,13 @@ function App() {
         <section className="chart-section">
           <h2>Porcentaje de Utilización del CPU</h2>
           <div className="chart-container">
-            <Line data={cpuData} options={{
+            <Pie data={cpuData} options={{
               ...chartOptions,
               plugins: {
                 ...chartOptions.plugins,
                 title: {
                   display: true,
-                  text: 'CPU Usage - Tiempo Real'
+                  text: 'CPU Usage'
                 }
               }
             }} />
@@ -262,13 +229,13 @@ function App() {
         <section className="chart-section">
           <h2>Porcentaje de Utilización de la RAM</h2>
           <div className="chart-container">
-            <Line data={ramData} options={{
+            <Pie data={ramData} options={{
               ...chartOptions,
               plugins: {
                 ...chartOptions.plugins,
                 title: {
                   display: true,
-                  text: 'RAM Usage - Tiempo Real'
+                  text: 'RAM Usage'
                 }
               }
             }} />

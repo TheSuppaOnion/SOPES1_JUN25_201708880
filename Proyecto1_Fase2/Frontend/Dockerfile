@@ -20,8 +20,8 @@ FROM nginx:alpine
 # Copiar build de React
 COPY --from=build /app/build /usr/share/nginx/html
 
-# Copiar configuración de Nginx si existe
-COPY nginx.conf /etc/nginx/nginx.conf 2>/dev/null || echo "Usando configuración Nginx por defecto"
+# Copiar configuración de Nginx
+COPY nginx.conf /etc/nginx/nginx.conf
 
 EXPOSE 80
 

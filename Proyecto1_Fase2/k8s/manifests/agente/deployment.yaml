@@ -22,7 +22,7 @@ spec:
         imagePullPolicy: IfNotPresent
         env:
         - name: API_URL
-          value: "http://api-nodejs-service:3000/api/data"
+          value: "http://127.0.0.1:3001/api/data"
         - name: POLL_INTERVAL
           value: "2s"
         volumeMounts:
