@@ -1,0 +1,43 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-traffic-split
+  namespace: so1_fase2
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/canary: "true"
+    nginx.ingress.kubernetes.io/canary-weight: "50"
+spec:
+  rules:
+  - host: api.monitor.local
+    http:
+      paths:
+      # 50% tráfico a Python API
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: api-python-service
+            port:
+              number: 5000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-main
+  namespace: so1_fase2
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - host: api.monitor.local
+    http:
+      paths:
+      # 50% tráfico restante a Node.js API
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: api-nodejs-service
+            port:
+              number: 3000

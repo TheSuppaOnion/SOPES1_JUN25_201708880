@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: monitor-ingress
+  namespace: so1_fase2
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/upstream-weight-nodejs: "70"
+    nginx.ingress.kubernetes.io/upstream-weight-python: "30"
+spec:
+  rules:
+  - host: monitor.local
+    http:
+      paths:
+      # Frontend
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend-service
+            port:
+              number: 8080
+      # WebSocket API
+      - path: /ws
+        pathType: Prefix
+        backend:
+          service:
+            name: websocket-api-service
+            port:
+              number: 4000
+      # API Traffic Split (70% Node.js, 30% Python)
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: api-nodejs-service
+            port:
+              number: 3000

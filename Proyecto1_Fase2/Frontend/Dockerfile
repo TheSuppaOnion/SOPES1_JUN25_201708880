@@ -1,36 +1,19 @@
-FROM golang:1.24-alpine AS builder
+FROM node:18-alpine AS build
 
 WORKDIR /app
 
-# Copiar el código fuente
+COPY package*.json ./
+RUN npm ci --only=production
+
 COPY . .
+RUN npm run build
 
-# Inicializar módulo Go y agregar dependencias automáticamente
-RUN go mod init monitor-frontend || true && \
-    go get github.com/gofiber/fiber/v2 && \
-    go get github.com/gofiber/template/html/v2 && \
-    go mod tidy
+FROM nginx:alpine
 
-# Compilar la aplicación
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/monitor-frontend
+COPY --from=build /app/build /usr/share/nginx/html
 
-# Crear una imagen mínima
-FROM alpine:3.15
+COPY nginx.conf /etc/nginx/nginx.conf
 
-WORKDIR /app
+EXPOSE 80
 
-# Copiar ejecutable desde la etapa de compilación
-COPY --from=builder /app/monitor-frontend .
-
-# Copiar vistas y archivos estáticos
-COPY --from=builder /app/views ./views
-COPY --from=builder /app/static ./static
-
-# Variable de entorno para la URL de la API
-ENV API_URL=http://api:3000
-
-# Exponer puerto
-EXPOSE 8080
-
-# Comando para ejecutar la aplicación
-CMD ["/app/monitor-frontend"]
+CMD ["nginx", "-g", "daemon off;"]

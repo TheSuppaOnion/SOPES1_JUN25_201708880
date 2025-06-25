@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+  namespace: so1_fase2
+  labels:
+    app: frontend
+spec:
+  selector:
+    app: frontend
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+  type: NodePort

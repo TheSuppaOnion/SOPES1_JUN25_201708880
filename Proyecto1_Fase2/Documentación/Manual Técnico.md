@@ -48,9 +48,14 @@ echo "Pip instalado: $(pip3 --version)"
 echo 'alias python=python3' >> ~/.bashrc
 echo 'alias pip=pip3' >> ~/.bashrc
 
-# Instalar Locust para pruebas de carga
-pip3 install --user locust requests faker
-echo "Locust instalado: $(python3 -m locust --version)"
+# Crear entorno virtual para Locust
+echo "Creando entorno virtual para Locust..."
+python3 -m venv ~/locust-env
+
+# Activar entorno virtual e instalar Locust
+echo "Instalando Locust en entorno virtual..."
+source ~/locust-env/bin/activate && pip install locust requests faker
+echo "Locust instalado en entorno virtual"
 
 # Instalar Go 1.24.4
 wget https://go.dev/dl/go1.24.4.linux-amd64.tar.gz

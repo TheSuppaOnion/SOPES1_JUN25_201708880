@@ -1,52 +1,51 @@
 from locust import HttpUser, task, between
 import json
-import time
+import random
 
-class VMMonitoringUser(HttpUser):
-    # Peticiones cada 1-2 segundos como especifica el enunciado
+class TrafficSplitUser(HttpUser):
     wait_time = between(1, 2)
     
     def on_start(self):
         """Se ejecuta cuando inicia cada usuario"""
-        print(f"Usuario iniciado: {self.client.base_url}")
+        # Elegir API aleatoriamente para simular traffic split
+        self.api_choice = random.choice(['nodejs', 'python'])
+        if self.api_choice == 'nodejs':
+            self.host = "http://localhost:3000"
+        else:
+            self.host = "http://localhost:5000"
     
-    @task(10)  # Tarea principal - el endpoint completo
+    @task(10)  # Tarea principal - probar endpoint completo
     def get_complete_metrics(self):
         """Simula petición al endpoint completo que devuelve el JSON específico"""
-        with self.client.get("/api/metrics/complete", catch_response=True, name="Complete Metrics") as response:
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                    # Verificar que tenga todos los campos requeridos
-                    required_fields = [
-                        'total_ram', 'ram_libre', 'uso_ram', 'porcentaje_ram',
-                        'porcentaje_cpu_uso', 'porcentaje_cpu_libre',
-                        'procesos_corriendo', 'total_procesos', 'procesos_durmiendo',
-                        'procesos_zombie', 'procesos_parados', 'hora'
-                    ]
-                    
-                    if all(field in data for field in required_fields):
-                        response.success()
-                        # Opcional: imprimir algunas métricas para debug
-                        if hasattr(self, '_request_count'):
-                            self._request_count += 1
+        with self.client.get("/api/metrics/complete", 
+                           catch_response=True,
+                           name=f"api_metrics_complete_{self.api_choice}") as response:
+            try:
+                if response.status_code == 200:
+                    json_data = response.json()
+                    # Verificar que tenga el campo "api" requerido
+                    if "api" in json_data:
+                        expected_api = "NodeJS" if self.api_choice == 'nodejs' else "Python"
+                        if json_data["api"] == expected_api:
+                            response.success()
                         else:
-                            self._request_count = 1
-                            
-                        if self._request_count % 100 == 0:  # Cada 100 requests
-                            print(f"Request {self._request_count}: CPU {data['porcentaje_cpu_uso']}%, RAM {data['porcentaje_ram']}%")
+                            response.failure(f"API field mismatch: expected {expected_api}, got {json_data.get('api')}")
                     else:
-                        response.failure("JSON incompleto - faltan campos requeridos")
-                except json.JSONDecodeError:
-                    response.failure("Respuesta no es JSON válido")
-            else:
-                response.failure(f"HTTP {response.status_code}")
+                        response.failure("Missing 'api' field in response")
+                else:
+                    response.failure(f"HTTP {response.status_code}")
+            except json.JSONDecodeError:
+                response.failure("Invalid JSON response")
+            except Exception as e:
+                response.failure(f"Error: {str(e)}")
     
-    @task(2)  # Tarea secundaria ocasional
-    def visit_dashboard(self):
-        """Visita ocasional al dashboard"""
-        with self.client.get("/", catch_response=True, name="Dashboard") as response:
+    @task(2)  # Tarea secundaria - health check
+    def health_check(self):
+        """Health check de la API"""
+        with self.client.get("/health",
+                           catch_response=True,
+                           name=f"health_check_{self.api_choice}") as response:
             if response.status_code == 200:
                 response.success()
             else:
-                response.failure(f"Dashboard HTTP {response.status_code}")
+                response.failure(f"Health check failed: HTTP {response.status_code}")

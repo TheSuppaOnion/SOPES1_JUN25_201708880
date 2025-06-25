@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-python
+  namespace: so1_fase2
+  labels:
+    app: api-python
+    route: python
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-python
+  template:
+    metadata:
+      labels:
+        app: api-python
+        route: python
+    spec:
+      containers:
+      - name: api-python
+        image: bismarckr/api-python:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5000
+        env:
+        - name: DB_HOST
+          value: "mysql-service"
+        - name: DB_PORT
+          value: "3306"
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: mysql-user
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: mysql-password
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: mysql-database
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "150m"
+          limits:
+            memory: "512Mi"
+            cpu: "300m"

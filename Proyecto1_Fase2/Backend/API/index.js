@@ -10,7 +10,7 @@ app.use(express.json());
 
 // Configuración de la base de datos
 const dbConfig = {
-  host: process.env.DB_HOST || 'localhost',
+  host: process.env.DB_HOST || 'mysql-service',
   port: process.env.DB_PORT || 3306,
   user: process.env.DB_USER || 'monitor',
   password: process.env.DB_PASSWORD || 'monitor123',
@@ -27,7 +27,7 @@ const pool = mysql.createPool(dbConfig);
 async function checkDBConnection() {
   try {
     const connection = await pool.getConnection();
-    console.log('Conexión a MySQL establecida correctamente');
+    console.log('Conexión a MySQL establecida correctamente - API NodeJS');
     connection.release();
     return true;
   } catch (error) {
@@ -36,41 +36,54 @@ async function checkDBConnection() {
   }
 }
 
+// Health check para Kubernetes
+app.get('/health', async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+    connection.release();
+    
+    res.json({
+      "status": "healthy",
+      "api": "NodeJS",
+      "timestamp": new Date().toISOString(),
+      "database": "connected"
+    });
+  } catch (error) {
+    console.error('Health check failed:', error);
+    res.status(503).json({
+      "status": "unhealthy",
+      "api": "NodeJS",
+      "error": error.message
+    });
+  }
+});
+
 // Inicializar la tabla de caché si es necesario
 async function initCacheTable() {
   try {
-    // Verificar si existen registros para CPU y RAM en la tabla de caché
-    const [cpuCache] = await pool.execute('SELECT * FROM metrics_cache WHERE id = ?', ['cpu']);
-    if (cpuCache.length === 0) {
-      await pool.execute(
-        'INSERT INTO metrics_cache (id, timestamp, data) VALUES (?, ?, ?)',
-        ['cpu', 0, JSON.stringify({ porcentaje_uso: 0 })]
-      );
-      console.log('Inicializado registro de caché para CPU');
-    }
+    // Verificar si existen registros para CPU, RAM y procesos en la tabla de caché
+    const cacheIds = ['cpu', 'ram', 'procesos'];
+    const cacheDefaults = {
+      'cpu': { porcentaje_uso: 0 },
+      'ram': { total: 0, libre: 0, uso: 0, porcentaje_uso: 0 },
+      'procesos': { 
+        procesos_corriendo: 0, 
+        total_processos: 0, 
+        procesos_durmiendo: 0, 
+        procesos_zombie: 0, 
+        procesos_parados: 0 
+      }
+    };
 
-    const [ramCache] = await pool.execute('SELECT * FROM metrics_cache WHERE id = ?', ['ram']);
-    if (ramCache.length === 0) {
-      await pool.execute(
-        'INSERT INTO metrics_cache (id, timestamp, data) VALUES (?, ?, ?)',
-        ['ram', 0, JSON.stringify({ total: 0, libre: 0, uso: 0, porcentaje_uso: 0 })]
-      );
-      console.log('Inicializado registro de caché para RAM');
-    }
-
-    const [procesosCache] = await pool.execute('SELECT * FROM metrics_cache WHERE id = ?', ['procesos']);
-    if (procesosCache.length === 0) {
-      await pool.execute(
-        'INSERT INTO metrics_cache (id, timestamp, data) VALUES (?, ?, ?)',
-        ['procesos', 0, JSON.stringify({ 
-          procesos_corriendo: 0, 
-          total_processos: 0, 
-          procesos_durmiendo: 0, 
-          procesos_zombie: 0, 
-          procesos_parados: 0 
-        })]
-      );
-      console.log('Inicializado registro de caché para procesos');
+    for (const cacheId of cacheIds) {
+      const [cache] = await pool.execute('SELECT * FROM metrics_cache WHERE id = ?', [cacheId]);
+      if (cache.length === 0) {
+        await pool.execute(
+          'INSERT INTO metrics_cache (id, timestamp, data) VALUES (?, ?, ?)',
+          [cacheId, 0, JSON.stringify(cacheDefaults[cacheId])]
+        );
+        console.log(`Inicializado registro de caché para ${cacheId}`);
+      }
     }
 
     console.log('Tabla de caché verificada correctamente');
@@ -82,32 +95,60 @@ async function initCacheTable() {
 const SAMPLE_RATE = 2000;
 let lastSampleTime = 0;
 
-// Endpoint para recibir métricas del agente Go
+// Endpoint principal para recibir métricas del agente Go
+// Ruta 2 del Traffic Split - API NodeJS
 app.post('/api/data', async (req, res) => {
   try {
-    const { timestamp, cpu, ram, procesos } = req.body;
+    const data = req.body;
     const now = Date.now();
     
-    if (!timestamp || !cpu || !ram || !procesos) {
-      return res.status(400).json({ error: 'Datos incompletos' });
+    if (!data) {
+      return res.status(400).json({ 
+        error: 'No data provided', 
+        api: 'NodeJS' 
+      });
     }
+
+    console.log('Datos recibidos en API NodeJS:', data);
+
+    // Procesar datos según formato del agente Go
+    const timestamp = Math.floor(Date.now() / 1000);
+    
+    // Extraer métricas de CPU
+    const cpu_data = data.cpu || {};
+    const cpu_usage = cpu_data.porcentajeUso || 0;
+    
+    // Extraer métricas de RAM  
+    const ram_data = data.ram || {};
+    const ram_total = ram_data.total || 0;
+    const ram_libre = ram_data.libre || 0;
+    const ram_uso = ram_data.uso || 0;
+    const ram_percentage = ram_data.porcentajeUso || 0;
+    
+    // Extraer métricas de procesos
+    const process_data = data.procesos || {};
+    const processes_running = process_data.procesos_corriendo || 0;
+    const processes_total = process_data.total_processos || 0;
+    const processes_sleeping = process_data.procesos_durmiendo || 0;
+    const processes_zombie = process_data.procesos_zombie || 0;
+    const processes_stopped = process_data.procesos_parados || 0;
 
     // Actualizar la caché en la base de datos
     try {
       // Actualizar caché de CPU
       await pool.execute(
         'UPDATE metrics_cache SET timestamp = ?, data = ?, updated_at = NOW() WHERE id = ?',
-        [timestamp, JSON.stringify({ porcentaje_uso: cpu.porcentajeUso }), 'cpu']
+        [timestamp, JSON.stringify({ porcentaje_uso: cpu_usage }), 'cpu']
       );
 
       // Actualizar caché de RAM
       await pool.execute(
         'UPDATE metrics_cache SET timestamp = ?, data = ?, updated_at = NOW() WHERE id = ?',
         [timestamp, JSON.stringify({
-          total: ram.total,
-          libre: ram.libre,
-          uso: ram.uso,
-          porcentaje_uso: ram.porcentajeUso
+          total: ram_total,
+          libre: ram_libre,
+          uso: ram_uso,
+          porcentaje_uso: ram_percentage
         }), 'ram']
       );
 
@@ -115,11 +156,11 @@ app.post('/api/data', async (req, res) => {
       await pool.execute(
         'UPDATE metrics_cache SET timestamp = ?, data = ?, updated_at = NOW() WHERE id = ?',
         [timestamp, JSON.stringify({
-          procesos_corriendo: procesos.procesos_corriendo,
-          total_processos: procesos.total_processos,
-          procesos_durmiendo: procesos.procesos_durmiendo,
-          procesos_zombie: procesos.procesos_zombie,
-          procesos_parados: procesos.procesos_parados
+          procesos_corriendo: processes_running,
+          total_processos: processes_total,
+          procesos_durmiendo: processes_sleeping,
+          procesos_zombie: processes_zombie,
+          procesos_parados: processes_stopped
         }), 'procesos']
       );
     } catch (cacheError) {
@@ -134,203 +175,66 @@ app.post('/api/data', async (req, res) => {
       // Guardar datos de CPU
       await pool.execute(
         'INSERT INTO cpu_metrics (timestamp, porcentaje_uso) VALUES (?, ?)',
-        [timestamp, cpu.porcentajeUso]
+        [timestamp, cpu_usage]
       );
       
       // Guardar datos de RAM
       await pool.execute(
         'INSERT INTO ram_metrics (timestamp, total, libre, uso, porcentaje_uso) VALUES (?, ?, ?, ?, ?)',
-        [timestamp, ram.total, ram.libre, ram.uso, ram.porcentajeUso]
+        [timestamp, ram_total, ram_libre, ram_uso, ram_percentage]
       );
       
       // Guardar datos de procesos 
       await pool.execute(
         'INSERT INTO procesos_metrics (timestamp, procesos_corriendo, total_processos, procesos_durmiendo, procesos_zombie, procesos_parados) VALUES (?, ?, ?, ?, ?, ?)',
-        [timestamp, procesos.procesos_corriendo, procesos.total_processos, procesos.procesos_durmiendo, procesos.procesos_zombie, procesos.procesos_parados]
+        [timestamp, processes_running, processes_total, processes_sleeping, processes_zombie, processes_stopped]
       );
       
-      console.log(`Métricas completas guardadas - Timestamp: ${new Date(timestamp * 1000).toISOString()}`);
+      console.log(`Métricas completas guardadas por API NodeJS - Timestamp: ${new Date(timestamp * 1000).toISOString()}`);
     } else {
-      console.log(`Solo caché actualizada - Timestamp: ${new Date(timestamp * 1000).toISOString()}`);
+      console.log(`Solo caché actualizada por API NodeJS - Timestamp: ${new Date(timestamp * 1000).toISOString()}`);
     }
+
+    // Preparar datos de respuesta (mismo formato que Python)
+    const cache_data = {
+      "total_ram": Math.floor(ram_total / 1024) || 0,
+      "ram_libre": ram_libre,
+      "uso_ram": Math.floor(ram_uso / 1024) || 0,
+      "porcentaje_ram": ram_percentage,
+      "porcentaje_cpu_uso": cpu_usage,
+      "porcentaje_cpu_libre": 100 - cpu_usage,
+      "procesos_corriendo": processes_running,
+      "total_procesos": processes_total,
+      "procesos_durmiendo": processes_sleeping,
+      "procesos_zombie": processes_zombie,
+      "procesos_parados": processes_stopped,
+      "hora": new Date().toISOString().replace('T', ' ').slice(0, 19),
+      "api": "NodeJS"  // Identificador de la API
+    };
     
-    res.status(201).json({ message: 'Métricas recibidas correctamente' });
-  } catch (error) {
-    console.error('Error al guardar métricas:', error);
-    res.status(500).json({ error: 'Error interno del servidor' });
-  }
-});
-
-// Endpoint para obtener métricas de CPU
-app.get('/api/metrics/cpu', async (req, res) => {
-  try {
-    const [rows] = await pool.execute(
-      'SELECT * FROM cpu_metrics ORDER BY timestamp DESC LIMIT 100'
-    );
+    console.log('Métricas guardadas exitosamente por API NodeJS');
     
-    res.json(rows);
-  } catch (error) {
-    console.error('Error al obtener métricas de CPU:', error);
-    res.status(500).json({ error: 'Error interno del servidor' });
-  }
-});
-
-// Endpoint para obtener métricas de RAM
-app.get('/api/metrics/ram', async (req, res) => {
-  try {
-    const [rows] = await pool.execute(
-      'SELECT * FROM ram_metrics ORDER BY timestamp DESC LIMIT 100'
-    );
-    
-    res.json(rows);
-  } catch (error) {
-    console.error('Error al obtener métricas de RAM:', error);
-    res.status(500).json({ error: 'Error interno del servidor' });
-  }
-});
-
-// Endpoint para obtener métricas de procesos
-app.get('/api/metrics/procesos', async (req, res) => {
-  try {
-    const [rows] = await pool.execute(
-      'SELECT * FROM procesos_metrics ORDER BY timestamp DESC LIMIT 100'
-    );
-    
-    res.json(rows);
-  } catch (error) {
-    console.error('Error al obtener métricas de procesos:', error);
-    res.status(500).json({ error: 'Error interno del servidor' });
-  }
-});
-
-// Endpoint para obtener las métricas más recientes - usando la tabla como caché
-app.get('/api/metrics/latest', async (req, res) => {
-  try {
-    // Obtener datos de caché desde la base de datos
-    const [cpuCache] = await pool.execute(
-      'SELECT timestamp, data, updated_at FROM metrics_cache WHERE id = ?',
-      ['cpu']
-    );
-    
-    const [ramCache] = await pool.execute(
-      'SELECT timestamp, data, updated_at FROM metrics_cache WHERE id = ?',
-      ['ram']
-    );
-
-    const [procesosCache] = await pool.execute(
-      'SELECT timestamp, data, updated_at FROM metrics_cache WHERE id = ?',
-      ['procesos']
-    );
-
-    // Verificar si la caché es reciente (menos de 2 segundos)
-    const now = Date.now();
-    const isCacheRecent = cpuCache.length > 0 && 
-                          now - new Date(cpuCache[0].updated_at).getTime() < 2000;
-
-    let cpuData, ramData, procesosData;
-
-    if (isCacheRecent) {
-      // Usar datos de la caché
-      console.log('Usando datos de caché');
-      // Función segura para analizar JSON
-      const safeParseJSON = (data) => {
-        if (typeof data === 'object' && data !== null) {
-          return data;  // Ya es un objeto
-        }
-        try {
-          return JSON.parse(data);
-        } catch (e) {
-          console.error('Error al analizar JSON:', e);
-          return {};  // Devolver objeto vacío en caso de error
-        }
-      };
-      
-      // Obtener datos de CPU de la caché
-      cpuData = cpuCache.length > 0 ? {
-        timestamp: cpuCache[0].timestamp,
-        ...safeParseJSON(cpuCache[0].data)
-      } : null;
-      
-      // Obtener datos de RAM de la caché
-      ramData = ramCache.length > 0 ? {
-        timestamp: ramCache[0].timestamp,
-        ...safeParseJSON(ramCache[0].data)
-      } : null;
-
-      // Obtener datos de procesos de la caché
-      procesosData = procesosCache.length > 0 ? {
-        timestamp: procesosCache[0].timestamp,
-        ...safeParseJSON(procesosCache[0].data)
-      } : null;
-    } else {
-      // Si la caché no es reciente, obtener datos de las tablas principales
-      console.log('Caché no reciente, consultando tablas principales');
-      
-      const [cpuRows] = await pool.execute(
-        'SELECT * FROM cpu_metrics ORDER BY timestamp DESC LIMIT 1'
-      );
-      
-      const [ramRows] = await pool.execute(
-        'SELECT * FROM ram_metrics ORDER BY timestamp DESC LIMIT 1'
-      );
-
-      const [procesosRows] = await pool.execute(
-        'SELECT * FROM procesos_metrics ORDER BY timestamp DESC LIMIT 1'
-      );
-      
-      cpuData = cpuRows.length > 0 ? cpuRows[0] : null;
-      ramData = ramRows.length > 0 ? ramRows[0] : null;
-      procesosData = procesosRows.length > 0 ? procesosRows[0] : null;
-
-      // Actualizar la caché con estos datos
-      if (cpuData) {
-        await pool.execute(
-          'UPDATE metrics_cache SET timestamp = ?, data = ?, updated_at = NOW() WHERE id = ?',
-          [cpuData.timestamp, JSON.stringify({ porcentaje_uso: cpuData.porcentaje_uso }), 'cpu']
-        );
-      }
-
-      if (ramData) {
-        await pool.execute(
-          'UPDATE metrics_cache SET timestamp = ?, data = ?, updated_at = NOW() WHERE id = ?',
-          [ramData.timestamp, JSON.stringify({
-            total: ramData.total,
-            libre: ramData.libre,
-            uso: ramData.uso,
-            porcentaje_uso: ramData.porcentaje_uso
-          }), 'ram']
-        );
-      }
-
-      if (procesosData) {
-        await pool.execute(
-          'UPDATE metrics_cache SET timestamp = ?, data = ?, updated_at = NOW() WHERE id = ?',
-          [procesosData.timestamp, JSON.stringify({
-            procesos_corriendo: procesosData.procesos_corriendo,
-            total_processos: procesosData.total_processos,
-            procesos_durmiendo: procesosData.procesos_durmiendo,
-            procesos_zombie: procesosData.procesos_zombie,
-            procesos_parados: procesosData.procesos_parados
-          }), 'procesos']
-        );
-      }
-    }
-    
-    res.json({
-      cpu: cpuData,
-      ram: ramData,
-      procesos: procesosData
+    res.status(201).json({
+      "message": "Metrics saved successfully",
+      "api": "NodeJS",
+      "timestamp": timestamp,
+      "data": cache_data
     });
+    
   } catch (error) {
-    console.error('Error al obtener métricas recientes:', error);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    console.error('Error al guardar métricas en API NodeJS:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      api: 'NodeJS',
+      details: error.message
+    });
   }
 });
 
-// Endpoint para obtener métricas completas de la Fase 2
+// Endpoint para obtener métricas completas de la Fase 2 (FORMATO EXACTO COMO PYTHON)
 app.get('/api/metrics/complete', async (req, res) => {
     try {
-        // Intentar obtener de caché primero
+        // Obtener datos de caché desde la base de datos
         const [cpuCache] = await pool.execute('SELECT timestamp, data FROM metrics_cache WHERE id = ?', ['cpu']);
         const [ramCache] = await pool.execute('SELECT timestamp, data FROM metrics_cache WHERE id = ?', ['ram']);
         const [procesosCache] = await pool.execute('SELECT timestamp, data FROM metrics_cache WHERE id = ?', ['procesos']);
@@ -339,18 +243,15 @@ app.get('/api/metrics/complete', async (req, res) => {
 
         const safeParseJSON = (data) => {
             try {
-                // Si ya es un objeto, devolverlo directamente
                 if (typeof data === 'object' && data !== null) {
                     return data;
                 }
-                // Si es string, parsearlo
                 if (typeof data === 'string') {
                     return JSON.parse(data);
                 }
-                // Si es otro tipo, devolver objeto vacío
                 return {};
             } catch (e) {
-                console.error('Error parsing JSON:', e, 'Data type:', typeof data, 'Data:', data);
+                console.error('Error parsing JSON:', e);
                 return {};
             }
         };
@@ -402,7 +303,7 @@ app.get('/api/metrics/complete', async (req, res) => {
             procesos_parados: processes?.procesos_parados || 0
         };
 
-        // Formato JSON
+        // Formato JSON EXACTO como Python (requerimientos)
         const response = {
             "total_ram": safeRam.total > 0 ? Math.floor(safeRam.total / 1024) : 0,
             "ram_libre": safeRam.libre || 0,
@@ -415,29 +316,193 @@ app.get('/api/metrics/complete', async (req, res) => {
             "procesos_durmiendo": safeProcesses.procesos_durmiendo,
             "procesos_zombie": safeProcesses.procesos_zombie,
             "procesos_parados": safeProcesses.procesos_parados,
-            "hora": new Date().toISOString().replace('T', ' ').slice(0, 19)
+            "hora": new Date().toISOString().replace('T', ' ').slice(0, 19),
+            "api": "NodeJS"  // ← CAMPO REQUERIDO
         };
 
-        console.log('Response being sent:', JSON.stringify(response, null, 2));
         res.json(response);
     } catch (error) {
         console.error('Error getting complete metrics:', error);
-        res.status(500).json({ error: 'Error retrieving metrics' });
+        res.status(500).json({ 
+            error: 'Error retrieving metrics',
+            api: 'NodeJS'
+        });
     }
 });
 
-// Endpoint para el dashboard (página principal)
+// Endpoint para métricas procesadas específicamente por la API NodeJS
+app.get('/api/metrics/nodejs', async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+    
+    // Obtener últimas métricas de cada tipo
+    const [cpuResults] = await connection.execute('SELECT * FROM cpu_metrics ORDER BY timestamp DESC LIMIT 10');
+    const [ramResults] = await connection.execute('SELECT * FROM ram_metrics ORDER BY timestamp DESC LIMIT 10');
+    const [processResults] = await connection.execute('SELECT * FROM procesos_metrics ORDER BY timestamp DESC LIMIT 10');
+    
+    connection.release();
+    
+    res.json({
+      "api": "NodeJS",
+      "timestamp": new Date().toISOString(),
+      "data": {
+        "cpu": cpuResults,
+        "ram": ramResults,
+        "procesos": processResults
+      },
+      "total_records": cpuResults.length + ramResults.length + processResults.length
+    });
+    
+  } catch (error) {
+    console.error('Error obteniendo métricas NodeJS:', error);
+    res.status(500).json({
+      error: 'Error retrieving metrics',
+      api: 'NodeJS'
+    });
+  }
+});
+
+// Endpoint para estadísticas específicas de la API NodeJS
+app.get('/api/stats/nodejs', async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+    
+    // Contar registros por tabla
+    const [cpuCount] = await connection.execute('SELECT COUNT(*) as count FROM cpu_metrics');
+    const [ramCount] = await connection.execute('SELECT COUNT(*) as count FROM ram_metrics');
+    const [processCount] = await connection.execute('SELECT COUNT(*) as count FROM procesos_metrics');
+    
+    // Obtener rango de fechas
+    const [dateRange] = await connection.execute(`
+      SELECT 
+        MIN(FROM_UNIXTIME(timestamp)) as oldest,
+        MAX(FROM_UNIXTIME(timestamp)) as newest
+      FROM cpu_metrics
+    `);
+    
+    connection.release();
+    
+    const stats = {
+      'cpu_metrics': cpuCount[0].count,
+      'ram_metrics': ramCount[0].count,
+      'procesos_metrics': processCount[0].count
+    };
+    
+    res.json({
+      "api": "NodeJS",
+      "timestamp": new Date().toISOString(),
+      "database_stats": stats,
+      "date_range": dateRange[0],
+      "total_records": Object.values(stats).reduce((a, b) => a + b, 0)
+    });
+    
+  } catch (error) {
+    console.error('Error obteniendo estadísticas NodeJS:', error);
+    res.status(500).json({
+      error: 'Error retrieving stats',
+      api: 'NodeJS'
+    });
+  }
+});
+
+// Mantener endpoints existentes para compatibilidad
+app.get('/api/metrics/cpu', async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT * FROM cpu_metrics ORDER BY timestamp DESC LIMIT 100'
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('Error al obtener métricas de CPU:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+app.get('/api/metrics/ram', async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT * FROM ram_metrics ORDER BY timestamp DESC LIMIT 100'
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('Error al obtener métricas de RAM:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+app.get('/api/metrics/procesos', async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT * FROM procesos_metrics ORDER BY timestamp DESC LIMIT 100'
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('Error al obtener métricas de procesos:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+app.get('/api/metrics/latest', async (req, res) => {
+  try {
+    const [cpuCache] = await pool.execute('SELECT timestamp, data, updated_at FROM metrics_cache WHERE id = ?', ['cpu']);
+    const [ramCache] = await pool.execute('SELECT timestamp, data, updated_at FROM metrics_cache WHERE id = ?', ['ram']);
+    const [procesosCache] = await pool.execute('SELECT timestamp, data, updated_at FROM metrics_cache WHERE id = ?', ['procesos']);
+
+    const safeParseJSON = (data) => {
+      if (typeof data === 'object' && data !== null) {
+        return data;
+      }
+      try {
+        return JSON.parse(data);
+      } catch (e) {
+        console.error('Error al analizar JSON:', e);
+        return {};
+      }
+    };
+    
+    const cpuData = cpuCache.length > 0 ? {
+      timestamp: cpuCache[0].timestamp,
+      ...safeParseJSON(cpuCache[0].data)
+    } : null;
+    
+    const ramData = ramCache.length > 0 ? {
+      timestamp: ramCache[0].timestamp,
+      ...safeParseJSON(ramCache[0].data)
+    } : null;
+
+    const procesosData = procesosCache.length > 0 ? {
+      timestamp: procesosCache[0].timestamp,
+      ...safeParseJSON(procesosCache[0].data)
+    } : null;
+    
+    res.json({
+      cpu: cpuData,
+      ram: ramData,
+      procesos: procesosData
+    });
+  } catch (error) {
+    console.error('Error al obtener métricas recientes:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// Endpoint raíz con información de la API
 app.get('/', (req, res) => {
   res.json({
-    status: 'API funcionando correctamente',
-    version: '2.0',
+    service: 'Sistema de Monitoreo - API NodeJS',
+    version: '2.0.0',
+    author: 'Bismarck Romero - 201708880',
+    description: 'Ruta 2 del Traffic Split - API desarrollada en NodeJS/Express',
     endpoints: [
-      'GET /api/metrics/complete - Métricas completas',
+      'GET /health - Health check',
+      'POST /api/data - Recibir métricas del agente',
+      'GET /api/metrics/complete - Formato completo requerido (con campo api)',
+      'GET /api/metrics/nodejs - Métricas procesadas por NodeJS',
+      'GET /api/stats/nodejs - Estadísticas de la API NodeJS',
+      'GET /api/metrics/latest - Métricas más recientes',
       'GET /api/metrics/cpu - Historial CPU',
       'GET /api/metrics/ram - Historial RAM',
-      'GET /api/metrics/procesos - Historial procesos',
-      'GET /api/metrics/latest - Métricas más recientes',
-      'POST /api/data - Recibir métricas del agente'
+      'GET /api/metrics/procesos - Historial procesos'
     ],
     timestamp: new Date().toISOString()
   });
@@ -447,32 +512,38 @@ app.get('/', (req, res) => {
 app.use('*', (req, res) => {
   res.status(404).json({
     error: 'Endpoint no encontrado',
+    api: 'NodeJS',
     path: req.originalUrl,
     available_endpoints: [
       '/',
+      '/health',
+      '/api/data',
       '/api/metrics/complete',
-      '/api/metrics/cpu',
-      '/api/metrics/ram',
-      '/api/metrics/procesos',
-      '/api/metrics/latest'
+      '/api/metrics/nodejs',
+      '/api/stats/nodejs'
     ]
   });
 });
 
-// Verificar conexión a la base de datos y inicializar caché antes de iniciar el servidor
-checkDBConnection()
-  .then(async (connected) => {
+// Inicializar servidor
+async function initServer() {
+  try {
+    const connected = await checkDBConnection();
     if (connected) {
-      // Inicializar la tabla de caché
       await initCacheTable();
       
       app.listen(PORT, () => {
-        console.log(`API ejecutándose en http://localhost:${PORT}`);
+        console.log(`API NodeJS (Ruta 2) ejecutándose en puerto ${PORT}`);
+        console.log(`Configuración de BD: ${dbConfig.host}:${dbConfig.port}`);
       });
     } else {
       console.error('No se pudo iniciar el servidor debido a problemas con la base de datos');
+      process.exit(1);
     }
-  })
-  .catch(error => {
-    console.error('Error al inicializar la API:', error);
-  });
+  } catch (error) {
+    console.error('Error al inicializar la API NodeJS:', error);
+    process.exit(1);
+  }
+}
+
+initServer();

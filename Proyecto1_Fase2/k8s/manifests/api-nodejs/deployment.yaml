@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-nodejs
+  namespace: so1_fase2
+  labels:
+    app: api-nodejs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-nodejs
+  template:
+    metadata:
+      labels:
+        app: api-nodejs
+    spec:
+      containers:
+      - name: api-nodejs
+        image: bismarckr/monitor-api:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 3000
+        env:
+        - name: DB_HOST
+          value: "mysql-service"
+        - name: DB_PORT
+          value: "3306"
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: mysql-user
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: mysql-password
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: mysql-database
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "150m"
+          limits:
+            memory: "512Mi"
+            cpu: "300m"
