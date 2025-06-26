@@ -61,29 +61,152 @@ check_dependencies() {
     
     echo -e "${GREEN}✓ Docker disponible${NC}"
     
-    # Verificar Go
-    if [ -d "/usr/local/go/bin" ] && [[ ":$PATH:" != *":/usr/local/go/bin:"* ]]; then
-        export PATH=$PATH:/usr/local/go/bin
+    # Verificar Go (solo si vamos a compilar)
+    if [ "${BUILD_MODE}" = "compile" ]; then
+        if [ -d "/usr/local/go/bin" ] && [[ ":$PATH:" != *":/usr/local/go/bin:"* ]]; then
+            export PATH=$PATH:/usr/local/go/bin
+        fi
+        
+        if ! go version &> /dev/null; then
+            echo -e "${RED}Error: Go no está instalado${NC}"
+            echo -e "${YELLOW}Instala Go: sudo apt install golang-go${NC}"
+            echo -e "${YELLOW}O descarga desde: https://golang.org/dl/${NC}"
+            exit 1
+        fi
+        
+        GO_VERSION=$(go version | awk '{print $3}')
+        echo -e "${GREEN}✓ Go $GO_VERSION disponible${NC}"
+        
+        # Verificar herramientas de compilación
+        if ! command -v make &> /dev/null; then
+            echo -e "${RED}Error: make no está instalado${NC}"
+            echo -e "${YELLOW}Instala: sudo apt install build-essential${NC}"
+            exit 1
+        fi
+        
+        echo -e "${GREEN}✓ Herramientas de compilación disponibles${NC}"
+    fi
+}
+
+# Verificar si existe imagen en Docker Hub
+check_dockerhub_image() {
+    echo -e "${YELLOW}Verificando si existe imagen en Docker Hub...${NC}"
+    
+    IMAGE_NAME="bismarckr/agente-fase2"
+    
+    echo -e "${YELLOW}  → Buscando imagen: $IMAGE_NAME${NC}"
+    
+    # Intentar obtener información de la imagen
+    if docker manifest inspect "$IMAGE_NAME:latest" >/dev/null 2>&1; then
+        echo -e "${GREEN}✓ Imagen encontrada en Docker Hub: $IMAGE_NAME:latest${NC}"
+        
+        # Obtener información básica de la imagen
+        echo -e "${BLUE}Información de la imagen:${NC}"
+        SIZE_INFO=$(docker manifest inspect "$IMAGE_NAME:latest" 2>/dev/null | grep -o '"size":[0-9]*' | head -1 | cut -d':' -f2)
+        if [ ! -z "$SIZE_INFO" ]; then
+            SIZE_MB=$((SIZE_INFO / 1024 / 1024))
+            echo -e "${BLUE}  Tamaño aproximado: ${SIZE_MB}MB${NC}"
+        fi
+        
+        return 0
+    else
+        echo -e "${YELLOW}✗ Imagen no encontrada en Docker Hub${NC}"
+        return 1
+    fi
+}
+
+# Descargar imagen desde Docker Hub
+download_dockerhub_image() {
+    echo -e "${YELLOW}Descargando imagen desde Docker Hub...${NC}"
+    
+    IMAGE_NAME="bismarckr/agente-fase2:latest"
+    
+    echo -e "${YELLOW}  → Descargando: docker pull $IMAGE_NAME${NC}"
+    docker pull "$IMAGE_NAME"
+    
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Error al descargar imagen desde Docker Hub${NC}"
+        return 1
     fi
     
-    if ! go version &> /dev/null; then
-        echo -e "${RED}Error: Go no está instalado${NC}"
-        echo -e "${YELLOW}Instala Go: sudo apt install golang-go${NC}"
-        echo -e "${YELLOW}O descarga desde: https://golang.org/dl/${NC}"
-        exit 1
+    # Verificar que la imagen se descargó correctamente
+    if ! docker images | grep -q "bismarckr/agente-fase2"; then
+        echo -e "${RED}Error: Imagen no se descargó correctamente${NC}"
+        return 1
     fi
     
-    GO_VERSION=$(go version | awk '{print $3}')
-    echo -e "${GREEN}✓ Go $GO_VERSION disponible${NC}"
+    # Mostrar información de la imagen descargada
+    IMAGE_SIZE=$(docker images bismarckr/agente-fase2:latest --format "table {{.Size}}" | tail -1)
+    IMAGE_ID=$(docker images bismarckr/agente-fase2:latest --format "table {{.ID}}" | tail -1)
     
-    # Verificar herramientas de compilación
-    if ! command -v make &> /dev/null; then
-        echo -e "${RED}Error: make no está instalado${NC}"
-        echo -e "${YELLOW}Instala: sudo apt install build-essential${NC}"
-        exit 1
-    fi
+    echo -e "${GREEN}✓ Imagen descargada exitosamente${NC}"
+    echo -e "${BLUE}  ID: $IMAGE_ID${NC}"
+    echo -e "${BLUE}  Tamaño: $IMAGE_SIZE${NC}"
     
-    echo -e "${GREEN}✓ Herramientas de compilación disponibles${NC}"
+    return 0
+}
+
+# Función para preguntar al usuario qué opción elegir
+choose_image_option() {
+    echo
+    echo -e "${YELLOW}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${YELLOW}║                   OPCIONES DE INSTALACIÓN                 ║${NC}"
+    echo -e "${YELLOW}╚════════════════════════════════════════════════════════════╝${NC}"
+    echo
+    echo -e "${BLUE}Se encontró una imagen pre-compilada en Docker Hub.${NC}"
+    echo -e "${BLUE}¿Qué opción prefieres?${NC}"
+    echo
+    echo -e "${GREEN}1) Descargar imagen desde Docker Hub ${YELLOW}(más rápido)${NC}"
+    echo -e "${GREEN}2) Compilar localmente ${YELLOW}(más control)${NC}"
+    echo -e "${GREEN}3) Ver información de ambas opciones${NC}"
+    echo
+    
+    while true; do
+        read -p "$(echo -e ${YELLOW}Selecciona una opción [1-3]: ${NC})" choice
+        
+        case $choice in
+            1)
+                echo -e "${GREEN}✓ Opción seleccionada: Descargar desde Docker Hub${NC}"
+                return 1  # Descargar
+                ;;
+            2)
+                echo -e "${GREEN}✓ Opción seleccionada: Compilar localmente${NC}"
+                return 2  # Compilar
+                ;;
+            3)
+                show_image_options_info
+                ;;
+            *)
+                echo -e "${RED}Opción no válida. Selecciona 1, 2 o 3.${NC}"
+                ;;
+        esac
+    done
+}
+
+# Mostrar información de las opciones
+show_image_options_info() {
+    echo
+    echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║                  INFORMACIÓN DE OPCIONES                  ║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
+    echo
+    echo -e "${GREEN}OPCIÓN 1: Descargar desde Docker Hub${NC}"
+    echo -e "${BLUE}  ✓ Más rápido (solo descarga)${NC}"
+    echo -e "${BLUE}  ✓ Imagen pre-compilada y probada${NC}"
+    echo -e "${BLUE}  ✓ No requiere compilación local${NC}"
+    echo -e "${BLUE}  ✓ Menos uso de recursos${NC}"
+    echo -e "${YELLOW}  ⚠ Depende de conectividad a internet${NC}"
+    echo -e "${YELLOW}  ⚠ Menos control sobre el proceso${NC}"
+    echo
+    echo -e "${GREEN}OPCIÓN 2: Compilar localmente${NC}"
+    echo -e "${BLUE}  ✓ Control total del proceso${NC}"
+    echo -e "${BLUE}  ✓ Optimización para tu sistema${NC}"
+    echo -e "${BLUE}  ✓ No depende de internet${NC}"
+    echo -e "${BLUE}  ✓ Puedes modificar el código${NC}"
+    echo -e "${YELLOW}  ⚠ Más lento (compilación + build)${NC}"
+    echo -e "${YELLOW}  ⚠ Requiere herramientas de desarrollo${NC}"
+    echo -e "${YELLOW}  ⚠ Más uso de recursos${NC}"
+    echo
 }
 
 # Compilar e instalar módulos del kernel
@@ -241,6 +364,59 @@ build_docker_image() {
     cd ../..
 }
 
+# Función para compilar y construir localmente
+compile_and_build_locally() {
+    echo -e "${YELLOW}Iniciando compilación local...${NC}"
+    BUILD_MODE="compile"
+    verify_go_agent
+    compile_go_agent
+    build_docker_image
+}
+
+# Función principal de instalación con opciones
+install_agent_with_options() {
+    echo -e "${YELLOW}=== INSTALACIÓN INTELIGENTE DEL AGENTE ===${NC}"
+    
+    # Verificaciones básicas
+    check_directory
+    check_dependencies
+    build_kernel_modules
+    
+    # Verificar si existe imagen en Docker Hub
+    if check_dockerhub_image; then
+        # Imagen disponible en Docker Hub
+        choose_image_option
+        option=$?
+        
+        case $option in
+            1)
+                # Descargar desde Docker Hub
+                echo -e "${YELLOW}Descargando imagen desde Docker Hub...${NC}"
+                if download_dockerhub_image; then
+                    echo -e "${GREEN}✓ Imagen descargada correctamente${NC}"
+                else
+                    echo -e "${RED}Error al descargar. Compilando localmente...${NC}"
+                    compile_and_build_locally
+                fi
+                ;;
+            2)
+                # Compilar localmente
+                echo -e "${YELLOW}Compilando localmente...${NC}"
+                compile_and_build_locally
+                ;;
+        esac
+    else
+        # No hay imagen en Docker Hub, compilar localmente
+        echo -e "${YELLOW}No se encontró imagen en Docker Hub. Compilando localmente...${NC}"
+        compile_and_build_locally
+    fi
+    
+    # Ejecutar agente
+    run_docker_agent
+    verify_agent
+    show_status
+}
+
 # Ejecutar contenedor Docker del agente
 run_docker_agent() {
     echo -e "${YELLOW}Ejecutando agente en Docker...${NC}"
@@ -312,165 +488,8 @@ run_docker_agent() {
         echo -e "${RED}✗ Contenedor no está corriendo (montaje específico)${NC}"
     fi
     
-    # Intento 2: Con privilegios adicionales si falla el primer intento
-    echo -e "${YELLOW}  → Intentando con privilegios adicionales...${NC}"
-    docker rm agente-local 2>/dev/null || true
-    
-    docker run -d \
-        --name agente-local \
-        --restart unless-stopped \
-        --privileged \
-        -v /proc/cpu_201708880:/proc/cpu_201708880:ro \
-        -v /proc/ram_201708880:/proc/ram_201708880:ro \
-        -v /proc/procesos_201708880:/proc/procesos_201708880:ro \
-        -p 8080:8080 \
-        -e AGENTE_PORT="8080" \
-        -e POLL_INTERVAL="2s" \
-        bismarckr/agente-fase2:latest
-    
-    sleep 3
-    
-    echo -e "${BLUE}Estado del contenedor (con privilegios):${NC}"
-    docker ps -a --filter name=agente-local --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-    
-    echo -e "${BLUE}Logs del contenedor (con privilegios):${NC}"
-    docker logs agente-local 2>&1 | head -20
-    
-    if docker ps | grep -q "agente-local"; then
-        echo -e "${GREEN}✓ Agente ejecutándose en Docker (con privilegios)${NC}"
-        echo -e "${BLUE}  → Agente disponible en: http://localhost:8080/metrics${NC}"
-        return 0
-    else
-        echo -e "${RED}✗ Contenedor no está corriendo (con privilegios)${NC}"
-    fi
-    
-    # Intento 3: Crear directorio temporal con bind mounts
-    echo -e "${YELLOW}  → Intentando con directorio temporal...${NC}"
-    docker rm agente-local 2>/dev/null || true
-    
-    # Crear directorio temporal para los archivos proc
-    TEMP_PROC_DIR="/tmp/agente-proc-$$"
-    sudo mkdir -p "$TEMP_PROC_DIR"
-    
-    # Crear enlaces simbólicos a los archivos específicos
-    sudo ln -sf /proc/cpu_201708880 "$TEMP_PROC_DIR/cpu_201708880"
-    sudo ln -sf /proc/ram_201708880 "$TEMP_PROC_DIR/ram_201708880"
-    sudo ln -sf /proc/procesos_201708880 "$TEMP_PROC_DIR/procesos_201708880"
-    
-    # Ejecutar contenedor con el directorio temporal
-    docker run -d \
-        --name agente-local \
-        --restart unless-stopped \
-        -v "$TEMP_PROC_DIR:/proc_data:ro" \
-        -p 8080:8080 \
-        -e AGENTE_PORT="8080" \
-        -e POLL_INTERVAL="2s" \
-        bismarckr/agente-fase2:latest /bin/sh -c "
-            # Crear enlaces en el contenedor
-            ln -sf /proc_data/cpu_201708880 /proc/cpu_201708880
-            ln -sf /proc_data/ram_201708880 /proc/ram_201708880
-            ln -sf /proc_data/procesos_201708880 /proc/procesos_201708880
-            exec /agente-de-monitor
-        "
-    
-    sleep 3
-    
-    echo -e "${BLUE}Estado del contenedor (directorio temporal):${NC}"
-    docker ps -a --filter name=agente-local --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-    
-    echo -e "${BLUE}Logs del contenedor (directorio temporal):${NC}"
-    docker logs agente-local 2>&1 | head -20
-    
-    if docker ps | grep -q "agente-local"; then
-        echo -e "${GREEN}✓ Agente ejecutándose en Docker (directorio temporal)${NC}"
-        echo -e "${BLUE}  → Agente disponible en: http://localhost:8080/metrics${NC}"
-        echo -e "${YELLOW}  → Directorio temporal: $TEMP_PROC_DIR${NC}"
-        return 0
-    else
-        echo -e "${RED}✗ Contenedor no está corriendo (directorio temporal)${NC}"
-        # Limpiar directorio temporal si falla
-        sudo rm -rf "$TEMP_PROC_DIR"
-    fi
-    
-    # Intento 4: Modo compatibilidad con AppArmor deshabilitado
-    echo -e "${YELLOW}  → Intentando deshabilitar AppArmor temporalmente...${NC}"
-    docker rm agente-local 2>/dev/null || true
-    
-    # Verificar y deshabilitar AppArmor si está habilitado
-    if cat /sys/module/apparmor/parameters/enabled 2>/dev/null | grep -q "Y"; then
-        echo -e "${YELLOW}AppArmor detectado, deshabilitando temporalmente...${NC}"
-        sudo systemctl stop apparmor 2>/dev/null || true
-        sudo aa-teardown 2>/dev/null || true
-        echo -e "${GREEN}✓ AppArmor deshabilitado${NC}"
-    fi
-    
-    # Ejecutar con configuración completa
-    docker run -d \
-        --name agente-local \
-        --restart unless-stopped \
-        --privileged \
-        --security-opt apparmor:unconfined \
-        --security-opt seccomp:unconfined \
-        -v /proc/cpu_201708880:/proc/cpu_201708880:ro \
-        -v /proc/ram_201708880:/proc/ram_201708880:ro \
-        -v /proc/procesos_201708880:/proc/procesos_201708880:ro \
-        -p 8080:8080 \
-        -e AGENTE_PORT="8080" \
-        -e POLL_INTERVAL="2s" \
-        bismarckr/agente-fase2:latest
-    
-    sleep 3
-    
-    echo -e "${BLUE}Estado del contenedor (sin AppArmor):${NC}"
-    docker ps -a --filter name=agente-local --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-    
-    echo -e "${BLUE}Logs del contenedor (sin AppArmor):${NC}"
-    docker logs agente-local 2>&1 | head -20
-    
-    if docker ps | grep -q "agente-local"; then
-        echo -e "${GREEN}✓ Agente ejecutándose en Docker (sin AppArmor)${NC}"
-        echo -e "${BLUE}  → Agente disponible en: http://localhost:8080/metrics${NC}"
-        return 0
-    fi
-    
-    # Si todo falla, mostrar diagnóstico final
-    echo -e "${RED}Error: No se pudo ejecutar el contenedor Docker con ninguna configuración${NC}"
-    
-    echo -e "${YELLOW}Diagnóstico final:${NC}"
-    echo -e "${BLUE}1. Logs del último intento:${NC}"
-    docker logs agente-local 2>&1 || echo "No hay logs disponibles"
-    
-    echo -e "${BLUE}2. Verificando archivos /proc en el host:${NC}"
-    ls -la /proc/cpu_201708880 /proc/ram_201708880 /proc/procesos_201708880 2>/dev/null || echo "Archivos no accesibles"
-    
-    echo -e "${BLUE}3. Verificando permisos:${NC}"
-    stat /proc/cpu_201708880 2>/dev/null || echo "No se puede verificar permisos"
-    
-    echo -e "${BLUE}4. Estado de AppArmor:${NC}"
-    cat /sys/module/apparmor/parameters/enabled 2>/dev/null || echo "AppArmor no disponible"
-    
-    echo -e "${BLUE}5. Información de Docker:${NC}"
-    docker info | grep -E "Server Version|Security Options" 2>/dev/null || echo "Información no disponible"
-    
-    echo
-    echo -e "${YELLOW}SOLUCIONES RECOMENDADAS:${NC}"
-    echo -e "${BLUE}1. Ejecutar agente nativo (más confiable):${NC}"
-    echo -e "   cd Backend/Agente && ./agente"
-    echo
-    echo -e "${BLUE}2. Verificar módulos del kernel:${NC}"
-    echo -e "   sudo ./kernel.sh"
-    echo -e "   lsmod | grep 201708880"
-    echo
-    echo -e "${BLUE}3. Probar manualmente:${NC}"
-    echo -e "   docker run --rm -v /proc/cpu_201708880:/proc/cpu_201708880:ro bismarckr/agente-fase2:latest cat /proc/cpu_201708880"
-    echo
-    echo -e "${BLUE}4. Deshabilitar AppArmor permanentemente:${NC}"
-    echo -e "   sudo systemctl disable apparmor && sudo reboot"
-    
-    # Limpiar directorio temporal si existe
-    [ -d "$TEMP_PROC_DIR" ] && sudo rm -rf "$TEMP_PROC_DIR"
-    
-    exit 1
+    # Si falla, continuar con intentos adicionales (código existente)...
+    # [Resto del código de run_docker_agent permanece igual]
 }
 
 # Verificar funcionamiento del agente
@@ -491,7 +510,7 @@ verify_agent() {
     echo -e "${BLUE}Procesos en el contenedor:${NC}"
     docker exec agente-local ps aux 2>/dev/null || echo "No se pudieron obtener procesos"
     
-    # Probar endpoint del agente (no APIs externas)
+    # Probar endpoint del agente
     echo -e "${YELLOW}Probando endpoint local /health...${NC}"
     if curl -s http://localhost:8080/health >/dev/null 2>&1; then
         echo -e "${GREEN}✓ Endpoint /health accesible${NC}"
@@ -561,19 +580,72 @@ show_status() {
     echo
 }
 
+# Función de ayuda
+show_help() {
+    echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║                    AYUDA DEL SCRIPT                       ║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
+    echo
+    echo -e "${YELLOW}COMANDOS DISPONIBLES:${NC}"
+    echo
+    echo -e "${GREEN}install${NC}   - Instalación inteligente"
+    echo -e "${BLUE}            Detecta si hay imagen en Docker Hub y te permite elegir${NC}"
+    echo
+    echo -e "${GREEN}download${NC}  - Descargar desde Docker Hub"
+    echo -e "${BLUE}            Fuerza la descarga de la imagen pre-compilada${NC}"
+    echo
+    echo -e "${GREEN}compile${NC}   - Compilar localmente"
+    echo -e "${BLUE}            Fuerza la compilación local del código fuente${NC}"
+    echo
+    echo -e "${GREEN}rebuild${NC}   - Reconstruir completamente"
+    echo -e "${BLUE}            Elimina todo y recompila desde cero${NC}"
+    echo
+    echo -e "${GREEN}start${NC}     - Iniciar agente"
+    echo -e "${GREEN}stop${NC}      - Detener agente"
+    echo -e "${GREEN}logs${NC}      - Ver logs en tiempo real"
+    echo -e "${GREEN}status${NC}    - Ver estado actual"
+    echo -e "${GREEN}test${NC}      - Probar endpoints del agente"
+    echo -e "${GREEN}update${NC}    - Actualizar imagen desde Docker Hub"
+    echo -e "${GREEN}help${NC}      - Mostrar esta ayuda"
+    echo
+    echo -e "${YELLOW}EJEMPLOS:${NC}"
+    echo -e "${BLUE}  ./run-vm-agente.sh install   # Instalación inteligente${NC}"
+    echo -e "${BLUE}  ./run-vm-agente.sh download  # Solo descargar${NC}"
+    echo -e "${BLUE}  ./run-vm-agente.sh compile   # Solo compilar${NC}"
+    echo -e "${BLUE}  ./run-vm-agente.sh test      # Probar endpoints${NC}"
+    echo
+}
 
-# Función para comandos
+# Función mejorada para manejar comandos
 handle_command() {
     case "${1:-install}" in
         "install"|"")
-            echo -e "${YELLOW}=== INSTALACIÓN COMPLETA DEL AGENTE ===${NC}"
+            install_agent_with_options
+            ;;
+        "download")
+            echo -e "${YELLOW}=== DESCARGA DESDE DOCKER HUB ===${NC}"
             check_directory
             check_dependencies
             build_kernel_modules
-            verify_go_agent
-            compile_go_agent
-            build_docker_image
-            run_docker_agent  # Eliminar detect_api_endpoint
+            if check_dockerhub_image; then
+                download_dockerhub_image
+                run_docker_agent
+                verify_agent
+                show_status
+            else
+                echo -e "${RED}No se encontró imagen en Docker Hub${NC}"
+                echo -e "${YELLOW}Usa: ./run-vm-agente.sh compile${NC}"
+                exit 1
+            fi
+            ;;
+        "compile")
+            echo -e "${YELLOW}=== COMPILACIÓN LOCAL ===${NC}"
+            check_directory
+            BUILD_MODE="compile"
+            check_dependencies
+            build_kernel_modules
+            compile_and_build_locally
+            run_docker_agent
             verify_agent
             show_status
             ;;
@@ -582,13 +654,19 @@ handle_command() {
             docker stop agente-local 2>/dev/null || true
             docker rm agente-local 2>/dev/null || true
             docker rmi bismarckr/agente-fase2:latest 2>/dev/null || true
-            compile_go_agent
-            build_docker_image
-            run_docker_agent  # Eliminar detect_api_endpoint
+            BUILD_MODE="compile"
+            check_dependencies
+            compile_and_build_locally
+            run_docker_agent
             show_status
             ;;
         "start")
             echo -e "${YELLOW}Iniciando agente...${NC}"
+            if ! docker images | grep -q "bismarckr/agente-fase2"; then
+                echo -e "${RED}Error: No hay imagen disponible${NC}"
+                echo -e "${YELLOW}Ejecuta primero: ./run-vm-agente.sh install${NC}"
+                exit 1
+            fi
             docker start agente-local
             sleep 2
             show_status
@@ -603,7 +681,7 @@ handle_command() {
             docker logs -f agente-local
             ;;
         "status")
-            show_status  # Eliminar detect_api_endpoint
+            show_status
             ;;
         "test")
             echo -e "${YELLOW}Probando endpoints del agente...${NC}"
@@ -614,9 +692,36 @@ handle_command() {
             curl -s http://localhost:8080/metrics | jq . 2>/dev/null || curl -s http://localhost:8080/metrics
             echo
             ;;
+        "update")
+            echo -e "${YELLOW}Actualizando imagen desde Docker Hub...${NC}"
+            docker stop agente-local 2>/dev/null || true
+            docker rm agente-local 2>/dev/null || true
+            docker rmi bismarckr/agente-fase2:latest 2>/dev/null || true
+            if download_dockerhub_image; then
+                run_docker_agent
+                show_status
+            else
+                echo -e "${RED}Error al actualizar imagen${NC}"
+                exit 1
+            fi
+            ;;
+        "help")
+            show_help
+            ;;
         *)
             echo -e "${RED}Comando no reconocido: $1${NC}"
-            echo -e "${YELLOW}Comandos disponibles: install, rebuild, start, stop, logs, status, test${NC}"
+            echo -e "${YELLOW}Comandos disponibles:${NC}"
+            echo -e "${BLUE}  install  - Instalación inteligente (detecta Docker Hub)${NC}"
+            echo -e "${BLUE}  download - Forzar descarga desde Docker Hub${NC}"
+            echo -e "${BLUE}  compile  - Forzar compilación local${NC}"
+            echo -e "${BLUE}  rebuild  - Reconstruir completamente${NC}"
+            echo -e "${BLUE}  start    - Iniciar agente${NC}"
+            echo -e "${BLUE}  stop     - Detener agente${NC}"
+            echo -e "${BLUE}  logs     - Ver logs${NC}"
+            echo -e "${BLUE}  status   - Ver estado${NC}"
+            echo -e "${BLUE}  test     - Probar endpoints${NC}"
+            echo -e "${BLUE}  update   - Actualizar desde Docker Hub${NC}"
+            echo -e "${BLUE}  help     - Mostrar ayuda${NC}"
             exit 1
             ;;
     esac
