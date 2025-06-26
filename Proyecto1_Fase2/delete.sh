@@ -284,12 +284,6 @@ show_final_summary() {
     echo -e "${BLUE}   • Procesos nativos detenidos${NC}"
     echo -e "${BLUE}   • Archivos temporales eliminados${NC}"
     echo
-    echo -e "${YELLOW}Para volver a desplegar el proyecto:${NC}"
-    echo -e "${BLUE}   1. ./setup-mysql-local.sh${NC}"
-    echo -e "${BLUE}   2. ./run-minikube.sh${NC}"
-    echo -e "${BLUE}   3. ./setup-frontend-local.sh${NC}"
-    echo -e "${BLUE}   4. Ejecutar agente (nativo o docker)${NC}"
-    echo
 }
 
 # MAIN - Función principal
