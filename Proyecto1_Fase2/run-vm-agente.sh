@@ -283,7 +283,7 @@ run_docker_agent() {
     
     # Configurar variables
     echo -e "${YELLOW}  → Configuración:${NC}"
-    echo -e "${BLUE}    API_URL: $API_URL${NC}"
+    echo -e "${BLUE}    AGENTE_PORT: 8080${NC}"
     echo -e "${BLUE}    POLL_INTERVAL: 2s${NC}"
     
     # Ejecutar contenedor con múltiples intentos
@@ -299,15 +299,18 @@ run_docker_agent() {
         --security-opt seccomp=unconfined \
         -v /proc:/proc:ro \
         -v /sys:/sys:ro \
-        -e API_URL="$API_URL" \
+        -p 8080:8080 \
+        -e AGENTE_PORT="8080" \
         -e POLL_INTERVAL="2s" \
         bismarckr/agente-fase2:latest 2>/dev/null
     
-    sleep 2
+    sleep 3
     
     # Verificar si funciona
     if docker ps | grep -q "agente-local"; then
         echo -e "${GREEN}✓ Agente ejecutándose en Docker${NC}"
+        echo -e "${BLUE}  → Agente disponible en: http://localhost:8080/metrics${NC}"
+        echo -e "${BLUE}  → Estado del agente: http://localhost:8080/health${NC}"
         return 0
     fi
     

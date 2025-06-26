@@ -7,7 +7,9 @@ import (
     "log"
     "net/http"
     "os"
+    "os/signal"
     "sync"
+    "syscall"
     "time"
 )
 
@@ -215,28 +217,39 @@ func procesarMetricas(apiURL string, interval time.Duration, cpuChan <-chan *CPU
 }
 
 func main() {
-    // Obtener URL de la API desde variables de entorno o usar valor predeterminado
-    apiURL := os.Getenv("API_URL")
-    if apiURL == "" {
-        apiURL = "http://localhost:3000/api/data"
+    // Obtener puerto del servidor desde variables de entorno o usar valor predeterminado
+    port := os.Getenv("AGENTE_PORT")
+    if port == "" {
+        port = "8080"
     }
-
+    
     // Obtener intervalo de polling desde variables de entorno o usar valor predeterminado
-    intervalStr := os.Getenv("POLL_INTERVAL")
-    interval := 2 * time.Second
-    if intervalStr != "" {
-        if parsedInterval, err := time.ParseDuration(intervalStr); err == nil {
-            interval = parsedInterval
-        }
+    pollInterval := os.Getenv("POLL_INTERVAL")
+    if pollInterval == "" {
+        pollInterval = "2s"
     }
-
+    
+    interval, err := time.ParseDuration(pollInterval)
+    if err != nil {
+        log.Fatalf("Error al parsear POLL_INTERVAL: %v", err)
+    }
+    
     // Rutas a los archivos de métricas
     cpuPath := "/proc/cpu_201708880"
     ramPath := "/proc/ram_201708880"
     procesosPath := "/proc/procesos_201708880"
-
-    log.Printf("Iniciando agente de monitoreo con concurrencia. Enviando métricas a %s cada %v", apiURL, interval)
-
+    
+    log.Printf("Iniciando agente de monitoreo como SERVIDOR en puerto %s", port)
+    log.Printf("Recolectando métricas cada %v", interval)
+    
+    // Estructura para almacenar las últimas métricas
+    var latestMetrics struct {
+        sync.RWMutex
+        CPU      *CPUMetric
+        RAM      *RAMMetric
+        Procesos *Procesos
+    }
+    
     // Crear canales para comunicación entre goroutines
     cpuChan := make(chan *CPUMetric, 10)
     ramChan := make(chan *RAMMetric, 10)
@@ -244,23 +257,116 @@ func main() {
     
     // WaitGroup para esperar a que todas las goroutines terminen
     var wg sync.WaitGroup
-    wg.Add(4)
+    wg.Add(4) // 3 monitores + 1 actualizador de métricas
     
     // Iniciar goroutine para monitorear CPU
-    go monitorCPU(cpuPath, interval/2, cpuChan, &wg)
+    go monitorCPU(cpuPath, interval, cpuChan, &wg)
     
     // Iniciar goroutine para monitorear RAM
-    go monitorRAM(ramPath, interval/2, ramChan, &wg)
+    go monitorRAM(ramPath, interval, ramChan, &wg)
 
     // Iniciar goroutine para monitorear procesos
-    go monitorProcesos(procesosPath, interval/2, procesosChan, &wg)
+    go monitorProcesos(procesosPath, interval, procesosChan, &wg)
     
-    // Iniciar goroutine para procesar y enviar métricas
-    go procesarMetricas(apiURL, interval, cpuChan, ramChan, procesosChan, &wg)
+    // Iniciar goroutine para actualizar métricas localmente
+    go func() {
+        defer wg.Done()
+        for {
+            select {
+            case cpu := <-cpuChan:
+                latestMetrics.Lock()
+                latestMetrics.CPU = cpu
+                latestMetrics.Unlock()
+                log.Printf("Métrica CPU actualizada: %d%%", cpu.Percentage)
+                
+            case ram := <-ramChan:
+                latestMetrics.Lock()
+                latestMetrics.RAM = ram
+                latestMetrics.Unlock()
+                log.Printf("Métrica RAM actualizada: %d%%", ram.Percentage)
+                
+            case procesos := <-procesosChan:
+                latestMetrics.Lock()
+                latestMetrics.Procesos = procesos
+                latestMetrics.Unlock()
+                log.Printf("Métrica Procesos actualizada: Total: %d, Corriendo: %d", 
+                    procesos.Total, procesos.Corriendo)
+            }
+        }
+    }()
+    
+    // Configurar servidor HTTP
+    http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "application/json")
+        w.Header().Set("Access-Control-Allow-Origin", "*")
+        w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+        w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+        
+        if r.Method == "OPTIONS" {
+            w.WriteHeader(http.StatusOK)
+            return
+        }
+        
+        if r.Method != "GET" {
+            http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
+            return
+        }
+        
+        // Obtener las últimas métricas
+        latestMetrics.RLock()
+        cpu := latestMetrics.CPU
+        ram := latestMetrics.RAM
+        procesos := latestMetrics.Procesos
+        latestMetrics.RUnlock()
+        
+        // Crear payload con las métricas más recientes
+        payload := MetricsPayload{
+            CPU:      cpu,
+            RAM:      ram,
+            Procesos: procesos,
+        }
+        
+        // Enviar respuesta JSON
+        if err := json.NewEncoder(w).Encode(payload); err != nil {
+            log.Printf("Error al codificar métricas: %v", err)
+            http.Error(w, "Error interno del servidor", http.StatusInternalServerError)
+            return
+        }
+        
+        log.Printf("Métricas enviadas a cliente %s", r.RemoteAddr)
+    })
+    
+    // Endpoint de salud
+    http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusOK)
+        json.NewEncoder(w).Encode(map[string]string{
+            "status": "ok",
+            "agent":  "monitor-agent",
+            "port":   port,
+        })
+    })
+    
+    // Iniciar servidor HTTP
+    go func() {
+        log.Printf("Servidor HTTP iniciado en puerto %s", port)
+        log.Printf("Endpoints disponibles:")
+        log.Printf("  GET /metrics - Obtener métricas actuales")
+        log.Printf("  GET /health  - Estado del agente")
+        
+        if err := http.ListenAndServe(":"+port, nil); err != nil {
+            log.Fatalf("Error al iniciar servidor HTTP: %v", err)
+        }
+    }()
     
     // Esperar señales para finalizar el programa
-    log.Printf("Agente de monitoreo ejecutándose. Presiona Ctrl+C para detener.")
+    log.Printf("Agente de monitoreo ejecutándose como SERVIDOR. Presiona Ctrl+C para detener.")
     
-    // Esperar a que todas las goroutines terminen (en la práctica, nunca terminan)
-    wg.Wait()
+    // Capturar señales de interrupción
+    sigChan := make(chan os.Signal, 1)
+    signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+    
+    // Esperar señal de interrupción
+    <-sigChan
+    log.Printf("Señal de interrupción recibida. Cerrando agente...")
 }

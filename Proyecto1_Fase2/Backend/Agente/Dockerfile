@@ -21,9 +21,12 @@ RUN apk --no-cache add ca-certificates
 # Copiar el ejecutable compilado
 COPY --from=builder /agente-de-monitor /agente-de-monitor
 
-# Variables de entorno (se sobrescribirán por docker-compose)
-ENV API_URL=http://api:3000/api/data
-ENV POLL_INTERVAL=5s
+# Exponer puerto del agente
+EXPOSE 8080
 
-# Ejecutar el agente
+# Variables de entorno por defecto
+ENV AGENTE_PORT=8080
+ENV POLL_INTERVAL=2s
+
+# Comando para ejecutar el agente
 CMD ["/agente-de-monitor"]
