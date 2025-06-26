@@ -34,7 +34,7 @@ fi
 # Crear base de datos y usuario
 echo -e "${YELLOW}Configurando base de datos y usuario...${NC}"
 
-mysql -u root -p <<EOF
+mysql -u monitor -p <<EOF
 -- Crear base de datos
 CREATE DATABASE IF NOT EXISTS monitoring;
 

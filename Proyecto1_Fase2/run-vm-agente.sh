@@ -46,15 +46,84 @@ check_docker() {
 check_golang() {
     echo -e "${YELLOW}Verificando Go...${NC}"
     
+    # Actualizar PATH para incluir Go si está instalado en /usr/local/go
+    if [ -d "/usr/local/go/bin" ] && [[ ":$PATH:" != *":/usr/local/go/bin:"* ]]; then
+        export PATH=$PATH:/usr/local/go/bin
+        echo -e "${BLUE}  → PATH actualizado para incluir Go${NC}"
+    fi
+    
+    # Verificar si Go está disponible
     if ! go version &> /dev/null; then
-        echo -e "${RED}Go no está instalado${NC}"
-        echo -e "${YELLOW}Instala Go desde: https://golang.org/dl/${NC}"
-        echo -e "${YELLOW}O usa: sudo apt install golang-go${NC}"
-        exit 1
+        echo -e "${RED}Go no está instalado o no está en el PATH${NC}"
+        echo -e "${YELLOW}Opciones para instalar Go:${NC}"
+        echo -e "${BLUE}  1. Automático: sudo apt install golang-go${NC}"
+        echo -e "${BLUE}  2. Manual desde: https://golang.org/dl/${NC}"
+        echo -e "${BLUE}  3. Script automático (recomendado):${NC}"
+        echo
+        echo -e "${YELLOW}¿Desea instalar Go automáticamente? (y/n): ${NC}"
+        read -r install_go
+        
+        if [[ $install_go =~ ^[Yy]$ ]]; then
+            install_golang_auto
+        else
+            echo -e "${RED}Go es requerido para compilar el agente${NC}"
+            exit 1
+        fi
     fi
     
     GO_VERSION=$(go version | awk '{print $3}')
     echo -e "${GREEN}✓ Go $GO_VERSION disponible${NC}"
+}
+
+# Función para instalar Go automáticamente
+install_golang_auto() {
+    echo -e "${YELLOW}Instalando Go automáticamente...${NC}"
+    
+    # Crear directorio temporal
+    TEMP_DIR=$(mktemp -d)
+    cd "$TEMP_DIR"
+    
+    # Descargar Go 1.21.0 (versión estable)
+    echo -e "${YELLOW}  → Descargando Go 1.21.0...${NC}"
+    wget -q https://go.dev/dl/go1.21.0.linux-amd64.tar.gz
+    
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Error al descargar Go${NC}"
+        echo -e "${YELLOW}Intentando con apt...${NC}"
+        sudo apt update && sudo apt install -y golang-go
+        cd - && rm -rf "$TEMP_DIR"
+        return
+    fi
+    
+    # Remover instalación anterior si existe
+    echo -e "${YELLOW}  → Removiendo instalación anterior...${NC}"
+    sudo rm -rf /usr/local/go
+    
+    # Instalar Go
+    echo -e "${YELLOW}  → Instalando Go en /usr/local/go...${NC}"
+    sudo tar -C /usr/local -xzf go1.21.0.linux-amd64.tar.gz
+    
+    # Actualizar PATH
+    echo -e "${YELLOW}  → Actualizando PATH...${NC}"
+    export PATH=$PATH:/usr/local/go/bin
+    
+    # Agregar al .profile si no está
+    if ! grep -q "/usr/local/go/bin" ~/.profile; then
+        echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
+        echo -e "${BLUE}  → PATH agregado a ~/.profile${NC}"
+    fi
+    
+    # Limpiar
+    cd - && rm -rf "$TEMP_DIR"
+    
+    # Verificar instalación
+    if go version &> /dev/null; then
+        echo -e "${GREEN}✓ Go instalado correctamente${NC}"
+    else
+        echo -e "${RED}Error en la instalación de Go${NC}"
+        echo -e "${YELLOW}Instale Go manualmente y vuelva a ejecutar este script${NC}"
+        exit 1
+    fi
 }
 
 # Verificar módulos del kernel
