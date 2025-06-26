@@ -1,393 +1,332 @@
 #!/bin/bash
 
-# Script para configurar VM del agente con módulos de kernel y Docker
+# Script para desplegar APIs en Kubernetes (Minikube)
 # Autor: Bismarck Romero - 201708880
-# Similar al run.sh pero para VM del agente
+# Fecha: Junio 2025 - SO1 Fase 2
 
+# Colores para mensajes
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 RED='\033[0;31m'
+YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
 clear
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${BLUE}║                                                            ║${NC}"
-echo -e "${BLUE}║ ${YELLOW}VM AGENTE MONITOR - Bismarck Romero - 201708880${BLUE}           ║${NC}"
-echo -e "${BLUE}║              ${YELLOW}MÓDULOS KERNEL + AGENTE DOCKER${BLUE}               ║${NC}"
+echo -e "${BLUE}║ ${YELLOW}APIs EN KUBERNETES - Bismarck Romero - 201708880${BLUE}          ║${NC}"
+echo -e "${BLUE}║                    ${YELLOW}SO1 FASE 2 - MINIKUBE${BLUE}                     ║${NC}"
 echo -e "${BLUE}║                                                            ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
 echo
 
-# Obtener IP de esta VM
-VM_IP=$(hostname -I | awk '{print $1}')
-echo -e "${YELLOW}IP de esta VM: ${GREEN}$VM_IP${NC}"
+echo -e "${YELLOW}=== DESPLEGANDO SOLO APIS EN KUBERNETES ===${NC}"
+echo -e "${BLUE}Nota: Frontend y Agente se manejan por separado${NC}"
 echo
 
-# Función para verificar Docker
+# Verificar si Docker está instalado
 check_docker() {
     echo -e "${YELLOW}Verificando Docker...${NC}"
     if ! command -v docker &> /dev/null; then
-        echo -e "${YELLOW}Instalando Docker...${NC}"
-        sudo apt update
-        sudo apt install -y docker.io
-        sudo systemctl enable docker
-        sudo systemctl start docker
-        sudo usermod -aG docker $USER
-        
-        echo -e "${YELLOW}Docker instalado. Reinicia la sesión o ejecuta:${NC}"
-        echo -e "${BLUE}newgrp docker${NC}"
-        echo -e "${YELLOW}Luego vuelve a ejecutar este script.${NC}"
-        exit 0
-    else
-        echo -e "${GREEN} ✓ Docker ya está instalado${NC}"
+        echo -e "${RED}Error: Docker no está instalado.${NC}"
+        echo -e "${YELLOW}Instale Docker: sudo apt install docker.io${NC}"
+        exit 1
     fi
     
-    # Verificar que Docker esté ejecutándose
-    if ! sudo systemctl is-active --quiet docker; then
-        echo -e "${YELLOW}Iniciando Docker...${NC}"
-        sudo systemctl start docker
+    if ! docker info &> /dev/null; then
+        echo -e "${RED}Error: Docker no está ejecutándose${NC}"
+        echo -e "${YELLOW}Inicie Docker y vuelva a ejecutar este script${NC}"
+        exit 1
     fi
     
-    # Verificar que el usuario esté en el grupo docker
-    if ! groups $USER | grep -q "docker"; then
-        echo -e "${YELLOW}Agregando usuario al grupo docker...${NC}"
-        sudo usermod -aG docker $USER
-        echo -e "${YELLOW}Ejecuta: newgrp docker${NC}"
-        echo -e "${YELLOW}Luego vuelve a ejecutar este script.${NC}"
-        exit 0
-    fi
+    echo -e "${GREEN}✓ Docker está disponible${NC}"
 }
 
-# Función para instalar módulos del kernel automáticamente
-install_kernel_modules() {
-    echo -e "${YELLOW}=== INSTALANDO MÓDULOS DEL KERNEL ===${NC}"
-    
-    # Verificar si ya están cargados
-    if lsmod | grep -q "cpu_201708880" && lsmod | grep -q "ram_201708880" && lsmod | grep -q "procesos_201708880"; then
-        echo -e "${GREEN} ✓ Módulos del kernel ya están cargados${NC}"
-        return 0
-    fi
-    
-    # Verificar si existe kernel.sh
-    if [ ! -f "./kernel.sh" ]; then
-        echo -e "${RED}Error: kernel.sh no encontrado en el directorio actual${NC}"
-        echo -e "${YELLOW}Asegúrate de estar en el directorio raíz del proyecto${NC}"
-        exit 1
-    fi
-    
-    # Ejecutar kernel.sh automáticamente
-    echo -e "${YELLOW}Ejecutando kernel.sh para instalar módulos...${NC}"
-    sudo ./kernel.sh
-    
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}Error al ejecutar kernel.sh${NC}"
-        exit 1
-    fi
-    
-    # Verificar que los módulos se cargaron correctamente
-    echo -e "${YELLOW}Verificando módulos cargados...${NC}"
-    if lsmod | grep -q "cpu_201708880" && lsmod | grep -q "ram_201708880" && lsmod | grep -q "procesos_201708880"; then
-        echo -e "${GREEN} ✓ Módulos del kernel cargados correctamente${NC}"
+# Verificar módulos del kernel
+check_kernel_modules() {
+    echo -e "${YELLOW}Verificando módulos del kernel...${NC}"
+    if ! lsmod | grep -q "cpu_201708880" || ! lsmod | grep -q "ram_201708880" || ! lsmod | grep -q "procesos_201708880"; then
+        echo -e "${YELLOW}Los módulos del kernel no están cargados.${NC}"
+        echo -e "${YELLOW}Ejecutando script de instalación de módulos...${NC}"
         
-        # Mostrar archivos /proc disponibles
-        echo -e "${YELLOW}Archivos /proc disponibles:${NC}"
-        ls -la /proc/ | grep 201708880
-        
-        # Probar lectura de métricas
-        echo -e "${YELLOW}Probando lectura de métricas:${NC}"
-        echo -e "${BLUE}CPU:${NC}"
-        cat /proc/cpu_201708880 | head -2
-        echo -e "${BLUE}RAM:${NC}"
-        cat /proc/ram_201708880 | head -2
-        echo -e "${BLUE}Procesos:${NC}"
-        cat /proc/procesos_201708880 | head -2
-        
-    else
-        echo -e "${RED}Error: Los módulos no se cargaron correctamente${NC}"
-        exit 1
-    fi
-}
-
-# Función para construir imagen Docker del agente
-build_agente_docker() {
-    echo -e "${YELLOW}=== CONSTRUYENDO IMAGEN DOCKER DEL AGENTE ===${NC}"
-    
-    # Verificar que el código del agente existe
-    if [ ! -f "Backend/Agente/agente-de-monitor.go" ]; then
-        echo -e "${RED}Error: Backend/Agente/agente-de-monitor.go no encontrado${NC}"
-        exit 1
-    fi
-    
-    cd Backend/Agente
-    
-    # Crear/verificar Dockerfile
-    if [ ! -f "Dockerfile" ]; then
-        echo -e "${YELLOW}Creando Dockerfile para el agente...${NC}"
-        cat > Dockerfile << 'EOF'
-FROM golang:1.19-alpine AS builder
-
-WORKDIR /app
-
-# Copiar código fuente
-COPY agente-de-monitor.go .
-
-# Inicializar módulo Go si no existe
-RUN go mod init agente-monitor 2>/dev/null || true
-RUN go mod tidy 2>/dev/null || true
-
-# Construir el binario
-RUN go build -o agente agente-de-monitor.go
-
-FROM alpine:latest
-
-# Instalar ca-certificates para HTTPS
-RUN apk --no-cache add ca-certificates curl
-
-WORKDIR /root/
-
-# Copiar el binario desde el builder
-COPY --from=builder /app/agente .
-
-# Variables de entorno por defecto
-ENV API_URL="http://host.docker.internal:3000/api/data"
-ENV POLL_INTERVAL="2s"
-
-# Comando por defecto
-CMD ["./agente"]
-EOF
-        echo -e "${GREEN} ✓ Dockerfile creado${NC}"
-    fi
-    
-    # Construir imagen
-    echo -e "${YELLOW}Construyendo imagen Docker del agente...${NC}"
-    docker build -t bismarckr/agente-vm:latest .
-    
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN} ✓ Imagen Docker del agente construida exitosamente${NC}"
-    else
-        echo -e "${RED}Error al construir la imagen Docker${NC}"
-        cd ../..
-        exit 1
-    fi
-    
-    cd ../..
-}
-
-# Función para configurar y ejecutar el agente
-run_agente_container() {
-    echo -e "${YELLOW}=== CONFIGURANDO Y EJECUTANDO AGENTE ===${NC}"
-    
-    # Configurar URL de la API (automático según detección de red)
-    if [ -n "$1" ]; then
-        # Si se pasa como parámetro
-        API_URL="$1"
-    else
-        # Detectar automáticamente
-        echo -e "${YELLOW}Detectando configuración de red...${NC}"
-        
-        # Verificar si hay conectividad a localhost (misma VM)
-        if curl -s --connect-timeout 3 http://localhost:3000/health > /dev/null 2>&1; then
-            API_URL="http://host.docker.internal:3000/api/data"
-            echo -e "${GREEN}Detectado: API en la misma VM${NC}"
-        else
-            # Buscar en la red local común (192.168.x.x)
-            LOCAL_NETWORK=$(ip route | grep -E '192\.168\.' | head -1 | awk '{print $1}' | cut -d'/' -f1 | cut -d'.' -f1-3)
-            if [ -n "$LOCAL_NETWORK" ]; then
-                echo -e "${YELLOW}Buscando API en red local ${LOCAL_NETWORK}.x...${NC}"
-                
-                # Probar IPs comunes en la red local
-                for i in 1 100 101 102 103 104 105; do
-                    TEST_IP="${LOCAL_NETWORK}.$i"
-                    if curl -s --connect-timeout 2 http://$TEST_IP:3000/health > /dev/null 2>&1; then
-                        API_URL="http://$TEST_IP:3000/api/data"
-                        echo -e "${GREEN}API encontrada en: $TEST_IP${NC}"
-                        break
-                    fi
-                done
-            fi
-            
-            # Si no se encontró, usar configuración manual
-            if [ -z "$API_URL" ]; then
-                echo -e "${YELLOW}No se pudo detectar la API automáticamente.${NC}"
-                read -p "Ingresa la IP de la VM principal: " manual_ip
-                API_URL="http://$manual_ip:3000/api/data"
-            fi
+        if [ ! -f "./kernel.sh" ]; then
+            echo -e "${RED}Error: kernel.sh no encontrado${NC}"
+            echo -e "${YELLOW}Asegúrate de estar en el directorio raíz del proyecto${NC}"
+            exit 1
         fi
-    fi
-    
-    # Configurar intervalo de polling
-    POLL_INTERVAL="2s"
-    
-    echo -e "${GREEN}Configuración del agente:${NC}"
-    echo -e "${BLUE}  API_URL: $API_URL${NC}"
-    echo -e "${BLUE}  POLL_INTERVAL: $POLL_INTERVAL${NC}"
-    
-    # Detener contenedor anterior si existe
-    echo -e "${YELLOW}Limpiando contenedores anteriores...${NC}"
-    docker stop agente-vm-monitor 2>/dev/null || true
-    docker rm agente-vm-monitor 2>/dev/null || true
-    
-    # Ejecutar contenedor con red del host para acceso completo a /proc
-    echo -e "${YELLOW}Ejecutando contenedor del agente...${NC}"
-    docker run -d \
-        --name agente-vm-monitor \
-        --restart unless-stopped \
-        --network host \
-        --pid host \
-        --privileged \
-        -v /proc:/proc:ro \
-        -v /sys:/sys:ro \
-        -e API_URL="$API_URL" \
-        -e POLL_INTERVAL="$POLL_INTERVAL" \
-        bismarckr/agente-vm:latest
-    
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN} ✓ Contenedor del agente iniciado correctamente${NC}"
         
-        # Esperar un momento y mostrar logs
-        sleep 3
-        echo -e "${YELLOW}Logs iniciales del agente:${NC}"
-        docker logs agente-vm-monitor | tail -10
-        
+        sudo ./kernel.sh
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}Error al cargar los módulos del kernel.${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}✓ Módulos del kernel cargados correctamente${NC}"
     else
-        echo -e "${RED}Error al iniciar el contenedor del agente${NC}"
-        exit 1
-    fi
-}
-
-# Función para verificar estado completo
-check_status() {
-    echo -e "${YELLOW}=== VERIFICANDO ESTADO COMPLETO ===${NC}"
-    
-    # 1. Módulos del kernel
-    echo -e "${BLUE}1. Módulos del kernel:${NC}"
-    if lsmod | grep -q "201708880"; then
-        lsmod | grep "201708880"
-        echo -e "${GREEN}   ✓ Módulos cargados correctamente${NC}"
-    else
-        echo -e "${RED}   ✗ Módulos no están cargados${NC}"
+        echo -e "${GREEN}✓ Módulos del kernel ya están cargados${NC}"
     fi
     
-    # 2. Archivos /proc
-    echo -e "${BLUE}2. Archivos /proc:${NC}"
+    # Verificar que /proc está disponible
+    echo -e "${YELLOW}Verificando archivos /proc...${NC}"
     for proc_file in cpu_201708880 ram_201708880 procesos_201708880; do
         if [ -f "/proc/$proc_file" ]; then
-            echo -e "${GREEN}   ✓ /proc/$proc_file disponible${NC}"
+            echo -e "${GREEN}  ✓ /proc/$proc_file disponible${NC}"
         else
-            echo -e "${RED}   ✗ /proc/$proc_file no disponible${NC}"
+            echo -e "${RED}  ✗ /proc/$proc_file no disponible${NC}"
+            exit 1
         fi
     done
-    
-    # 3. Contenedor Docker
-    echo -e "${BLUE}3. Contenedor Docker:${NC}"
-    if docker ps | grep -q "agente-vm-monitor"; then
-        echo -e "${GREEN}   ✓ Contenedor ejecutándose${NC}"
-        echo -e "${BLUE}   Estado: $(docker ps --filter name=agente-vm-monitor --format "{{.Status}}")${NC}"
-    else
-        echo -e "${RED}   ✗ Contenedor no está ejecutándose${NC}"
-    fi
-    
-    # 4. Conectividad con la API
-    echo -e "${BLUE}4. Conectividad:${NC}"
-    if docker exec agente-vm-monitor curl -s --connect-timeout 5 "$API_URL" > /dev/null 2>&1; then
-        echo -e "${GREEN}   ✓ Conectividad con API exitosa${NC}"
-    else
-        echo -e "${RED}   ✗ No hay conectividad con la API${NC}"
-        echo -e "${YELLOW}   URL configurada: $API_URL${NC}"
-    fi
-    
-    # 5. Logs recientes
-    echo -e "${BLUE}5. Logs recientes:${NC}"
-    docker logs agente-vm-monitor --tail 5 2>/dev/null || echo -e "${RED}   No hay logs disponibles${NC}"
 }
 
-# Función para mostrar información de uso
-show_usage() {
-    echo -e "${YELLOW}=== INFORMACIÓN DE USO ===${NC}"
+# Configurar Minikube
+setup_minikube() {
+    echo -e "${YELLOW}Verificando Minikube...${NC}"
+    if ! command -v minikube &> /dev/null; then
+        echo -e "${RED}Minikube no está instalado.${NC}"
+        echo -e "${YELLOW}Descargando e instalando Minikube automáticamente...${NC}"
+        
+        if [ ! -f "./k8s/scripts/setup-minikube.sh" ]; then
+            echo -e "${RED}Error: k8s/scripts/setup-minikube.sh no encontrado${NC}"
+            exit 1
+        fi
+        
+        ./k8s/scripts/setup-minikube.sh
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}Error al instalar y configurar Minikube.${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}✓ Minikube instalado correctamente${NC}"
+    else
+        echo -e "${GREEN}✓ Minikube ya está instalado${NC}"
+    fi
+
+    # Verificar si minikube está ejecutándose
+    echo -e "${YELLOW}Verificando estado de Minikube...${NC}"
+    if ! minikube status &> /dev/null; then
+        echo -e "${YELLOW}Iniciando Minikube...${NC}"
+        minikube start --driver=docker --memory=4096 --cpus=2
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}Error al iniciar Minikube${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}✓ Minikube iniciado correctamente${NC}"
+    else
+        echo -e "${GREEN}✓ Minikube ya está ejecutándose${NC}"
+    fi
+
+    # Verificar conectividad kubectl
+    echo -e "${YELLOW}Verificando conectividad con Kubernetes...${NC}"
+    kubectl config use-context minikube
+    kubectl get nodes &> /dev/null
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Error: kubectl no puede conectarse al cluster. Reiniciando Minikube...${NC}"
+        minikube delete
+        minikube start --driver=docker --memory=4096 --cpus=2 --force
+        kubectl config use-context minikube
+    fi
+    
+    echo -e "${GREEN}✓ Minikube configurado y conectado${NC}"
+}
+
+# Construir imágenes Docker para las APIs
+build_api_images() {
+    echo -e "${YELLOW}Construyendo imágenes Docker para las APIs...${NC}"
+    
+    if [ ! -f "./k8s/scripts/build-images.sh" ]; then
+        echo -e "${RED}Error: k8s/scripts/build-images.sh no encontrado${NC}"
+        exit 1
+    fi
+    
+    ./k8s/scripts/build-images.sh
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Error al construir imágenes.${NC}"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}✓ Imágenes Docker construidas exitosamente${NC}"
+}
+
+# Desplegar APIs en Kubernetes
+deploy_apis_to_kubernetes() {
+    echo -e "${YELLOW}Desplegando APIs en Kubernetes...${NC}"
+    
+    cd k8s/manifests
+
+    # Crear namespace
+    echo -e "${YELLOW}  → Creando namespace so1-fase2...${NC}"
+    kubectl apply -f namespace.yaml
+    
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Error al crear namespace${NC}"
+        exit 1
+    fi
+
+    # Desplegar API Node.js
+    echo -e "${YELLOW}  → Desplegando API Node.js...${NC}"
+    kubectl apply -f api-nodejs/
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Error al desplegar API Node.js${NC}"
+        exit 1
+    fi
+
+    # Desplegar API Python
+    echo -e "${YELLOW}  → Desplegando API Python...${NC}"
+    kubectl apply -f api-python/
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Error al desplegar API Python${NC}"
+        exit 1
+    fi
+
+    # Desplegar WebSocket API
+    echo -e "${YELLOW}  → Desplegando WebSocket API...${NC}"
+    kubectl apply -f websocket-api/
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Error al desplegar WebSocket API${NC}"
+        exit 1
+    fi
+
+    # Desplegar Ingress
+    echo -e "${YELLOW}  → Desplegando Ingress...${NC}"
+    kubectl apply -f ingress/
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Error al desplegar Ingress${NC}"
+        exit 1
+    fi
+
+    cd ../..
+    echo -e "${GREEN}✓ APIs desplegadas en Kubernetes${NC}"
+}
+
+# Esperar a que los pods estén listos
+wait_for_pods() {
+    echo -e "${YELLOW}Esperando a que las APIs estén listas...${NC}"
+    
+    echo -e "${YELLOW}  → Esperando API Node.js...${NC}"
+    kubectl wait --for=condition=ready pod -l app=api-nodejs -n so1-fase2 --timeout=180s
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Timeout esperando API Node.js${NC}"
+        kubectl logs -l app=api-nodejs -n so1-fase2 --tail=5
+        exit 1
+    fi
+    
+    echo -e "${YELLOW}  → Esperando API Python...${NC}"
+    kubectl wait --for=condition=ready pod -l app=api-python -n so1-fase2 --timeout=180s
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Timeout esperando API Python${NC}"
+        kubectl logs -l app=api-python -n so1-fase2 --tail=5
+        exit 1
+    fi
+    
+    echo -e "${YELLOW}  → Esperando WebSocket API...${NC}"
+    kubectl wait --for=condition=ready pod -l app=websocket-api -n so1-fase2 --timeout=180s
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Timeout esperando WebSocket API${NC}"
+        kubectl logs -l app=websocket-api -n so1-fase2 --tail=5
+        exit 1
+    fi
+    
+    echo -e "${GREEN}✓ Todas las APIs están listas${NC}"
+}
+
+# Verificar estado final
+verify_deployment() {
+    echo -e "${YELLOW}Verificando estado del despliegue...${NC}"
+    
+    # Estado de pods
+    echo -e "${BLUE}Estado de los pods:${NC}"
+    kubectl get pods -n so1-fase2
+    
+    # Estado de servicios
+    echo -e "${BLUE}Estado de los servicios:${NC}"
+    kubectl get services -n so1-fase2
+    
+    # Verificar conectividad básica
+    echo -e "${YELLOW}Verificando conectividad básica...${NC}"
+    
+    # Obtener IP de Minikube
+    MINIKUBE_IP=$(minikube ip)
+    echo -e "${BLUE}IP de Minikube: $MINIKUBE_IP${NC}"
+    
+    # Verificar que MySQL sea accesible desde un pod
+    echo -e "${YELLOW}Probando conectividad a MySQL desde pods...${NC}"
+    POD_NAME=$(kubectl get pods -n so1-fase2 -l app=api-nodejs -o jsonpath='{.items[0].metadata.name}')
+    if [ -n "$POD_NAME" ]; then
+        kubectl exec $POD_NAME -n so1-fase2 -- ping -c 1 host.minikube.internal &> /dev/null
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}  ✓ Conectividad host.minikube.internal OK${NC}"
+        else
+            echo -e "${YELLOW}  ⚠ Conectividad host.minikube.internal puede tener problemas${NC}"
+        fi
+    fi
+    
+    echo -e "${GREEN}✓ Verificación completada${NC}"
+}
+
+# Mostrar información de acceso
+show_access_info() {
     echo
-    echo -e "${GREEN}Comandos disponibles:${NC}"
-    echo -e "${BLUE}  ./run-vm-agente.sh              ${NC}# Configuración e instalación completa"
-    echo -e "${BLUE}  ./run-vm-agente.sh start        ${NC}# Iniciar agente existente"
-    echo -e "${BLUE}  ./run-vm-agente.sh stop         ${NC}# Detener agente"
-    echo -e "${BLUE}  ./run-vm-agente.sh restart      ${NC}# Reiniciar agente"
-    echo -e "${BLUE}  ./run-vm-agente.sh status       ${NC}# Ver estado completo"
-    echo -e "${BLUE}  ./run-vm-agente.sh logs         ${NC}# Ver logs en tiempo real"
-    echo -e "${BLUE}  ./run-vm-agente.sh rebuild      ${NC}# Reconstruir imagen y reiniciar"
+    echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║                                                            ║${NC}"
+    echo -e "${GREEN}║              ${YELLOW}APIS DESPLEGADAS EXITOSAMENTE${GREEN}                 ║${NC}"
+    echo -e "${GREEN}║                                                            ║${NC}"
+    echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
     echo
-    echo -e "${GREEN}Comandos de debug:${NC}"
-    echo -e "${BLUE}  lsmod | grep 201708880          ${NC}# Ver módulos cargados"
-    echo -e "${BLUE}  cat /proc/cpu_201708880         ${NC}# Ver métricas CPU"
-    echo -e "${BLUE}  cat /proc/ram_201708880         ${NC}# Ver métricas RAM"
-    echo -e "${BLUE}  docker logs agente-vm-monitor   ${NC}# Ver todos los logs"
+    echo -e "${YELLOW}📋 APIS DESPLEGADAS EN KUBERNETES:${NC}"
+    echo -e "${GREEN}  ✓ API Node.js      (puerto 3000)${NC}"
+    echo -e "${GREEN}  ✓ API Python       (puerto 5000)${NC}"
+    echo -e "${GREEN}  ✓ WebSocket API    (puerto 4000)${NC}"
+    echo -e "${GREEN}  ✓ Ingress          (balanceador de carga)${NC}"
+    echo
+    echo -e "${YELLOW}🌐 ACCESO A LAS APIS:${NC}"
+    echo -e "${BLUE}Para acceder desde el host:${NC}"
+    MINIKUBE_IP=$(minikube ip)
+    echo -e "   ${GREEN}API Node.js:     http://$MINIKUBE_IP:30000${NC}"
+    echo -e "   ${GREEN}API Python:      http://$MINIKUBE_IP:30001${NC}"  
+    echo -e "   ${GREEN}WebSocket API:   http://$MINIKUBE_IP:30002${NC}"
+    echo
+    echo -e "${BLUE}Usando minikube service:${NC}"
+    echo -e "   ${GREEN}minikube service api-nodejs-service -n so1-fase2${NC}"
+    echo -e "   ${GREEN}minikube service api-python-service -n so1-fase2${NC}"
+    echo -e "   ${GREEN}minikube service websocket-api-service -n so1-fase2${NC}"
+    echo
+    echo -e "${YELLOW}🔧 COMANDOS ÚTILES:${NC}"
+    echo -e "${BLUE}Ver estado:          ${GREEN}kubectl get pods -n so1-fase2${NC}"
+    echo -e "${BLUE}Ver logs Node.js:    ${GREEN}kubectl logs -f deployment/api-nodejs -n so1-fase2${NC}"
+    echo -e "${BLUE}Ver logs Python:     ${GREEN}kubectl logs -f deployment/api-python -n so1-fase2${NC}"
+    echo -e "${BLUE}Ver logs WebSocket:  ${GREEN}kubectl logs -f deployment/websocket-api -n so1-fase2${NC}"
+    echo
+    echo -e "${YELLOW}📦 PRÓXIMOS PASOS:${NC}"
+    echo -e "${BLUE}1. Configurar MySQL:     ${GREEN}./setup-mysql-local.sh${NC}"
+    echo -e "${BLUE}2. Ejecutar Frontend:    ${GREEN}./setup-frontend-local.sh${NC}"
+    echo -e "${BLUE}3. Configurar Agente:    ${GREEN}./run-vm-agente.sh${NC} ${YELLOW}(opcional)${NC}"
+    echo -e "${BLUE}4. Pruebas de carga:     ${GREEN}cd Locust && ./run_locust.sh${NC}"
+    echo
+    echo -e "${YELLOW}🗑️ Para limpiar todo:     ${RED}./delete.sh${NC}"
     echo
 }
 
 # Función principal
 main() {
-    case "${1:-install}" in
-        "install"|"")
-            echo -e "${YELLOW}=== INSTALACIÓN COMPLETA DE VM AGENTE ===${NC}"
-            check_docker
-            install_kernel_modules
-            build_agente_docker
-            run_agente_container "$2"
-            sleep 2
-            check_status
-            show_usage
-            ;;
-        "start")
-            echo -e "${YELLOW}Iniciando agente existente...${NC}"
-            docker start agente-vm-monitor
-            sleep 2
-            check_status
-            ;;
-        "stop")
-            echo -e "${YELLOW}Deteniendo agente...${NC}"
-            docker stop agente-vm-monitor
-            echo -e "${GREEN}✓ Agente detenido${NC}"
-            ;;
-        "restart")
-            echo -e "${YELLOW}Reiniciando agente...${NC}"
-            docker restart agente-vm-monitor
-            sleep 2
-            check_status
-            ;;
-        "status")
-            check_status
-            ;;
-        "logs")
-            echo -e "${YELLOW}Mostrando logs en tiempo real (Ctrl+C para salir)...${NC}"
-            docker logs -f agente-vm-monitor
-            ;;
-        "rebuild")
-            echo -e "${YELLOW}Reconstruyendo imagen y reiniciando...${NC}"
-            docker stop agente-vm-monitor 2>/dev/null || true
-            docker rm agente-vm-monitor 2>/dev/null || true
-            docker rmi bismarckr/agente-vm:latest 2>/dev/null || true
-            build_agente_docker
-            run_agente_container "$2"
-            sleep 2
-            check_status
-            ;;
-        *)
-            echo -e "${RED}Comando no reconocido: $1${NC}"
-            show_usage
-            exit 1
-            ;;
-    esac
+    echo -e "${YELLOW}Iniciando despliegue de APIs en Minikube...${NC}"
+    echo
+    
+    # Ejecutar todas las verificaciones y despliegue
+    check_docker
+    check_kernel_modules
+    setup_minikube
+    build_api_images
+    deploy_apis_to_kubernetes
+    wait_for_pods
+    verify_deployment
+    show_access_info
 }
 
-# Verificar si se está ejecutando como root (no recomendado)
+# Verificar permisos
 if [ "$EUID" -eq 0 ]; then
-    echo -e "${YELLOW}Advertencia: No ejecutes este script como root${NC}"
-    echo -e "${YELLOW}Ejecuta: su - tu_usuario${NC}"
-    echo -e "${YELLOW}Luego: ./run-vm-agente.sh${NC}"
+    echo -e "${YELLOW}⚠️ No ejecutes este script como root${NC}"
+    echo -e "${YELLOW}Usa: su - tu_usuario${NC}"
+    exit 1
 fi
 
 echo
 # Ejecutar función principal
 main "$@"
-
-echo
-echo -e "${GREEN}🎉 VM Agente configurada!${NC}"
