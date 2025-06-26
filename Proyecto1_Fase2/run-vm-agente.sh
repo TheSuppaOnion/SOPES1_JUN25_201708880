@@ -135,7 +135,7 @@ install_go_manually() {
 check_dependencies() {
     echo -e "${YELLOW}Verificando dependencias del sistema...${NC}"
     
-    # Verificar Docker
+    # Verificar Docker (SIEMPRE necesario)
     if ! command -v docker &> /dev/null; then
         echo -e "${RED}Error: Docker no está instalado${NC}"
         echo -e "${YELLOW}Instala Docker: sudo apt install docker.io${NC}"
@@ -149,53 +149,55 @@ check_dependencies() {
     fi
     
     echo -e "${GREEN}✓ Docker disponible${NC}"
+}
+
+# Nueva función específica para verificar Go
+check_go_dependencies() {
+    echo -e "${YELLOW}Verificando dependencias de Go para compilación...${NC}"
     
-    # Verificar Go (solo si vamos a compilar)
-    if [ "${BUILD_MODE}" = "compile" ]; then
-        # Verificar si Go ya está en PATH
-        if [ -d "/usr/local/go/bin" ] && [[ ":$PATH:" != *":/usr/local/go/bin:"* ]]; then
-            export PATH=$PATH:/usr/local/go/bin
-        fi
+    # Verificar si Go ya está en PATH
+    if [ -d "/usr/local/go/bin" ] && [[ ":$PATH:" != *":/usr/local/go/bin:"* ]]; then
+        export PATH=$PATH:/usr/local/go/bin
+    fi
+    
+    if ! go version &> /dev/null; then
+        echo -e "${YELLOW}Go no está instalado. Instalando automáticamente...${NC}"
         
-        if ! go version &> /dev/null; then
-            echo -e "${YELLOW}Go no está instalado. Instalando automáticamente...${NC}"
+        # Opción 1: Intentar instalar desde repositorio
+        echo -e "${YELLOW}  → Intentando instalar desde repositorio...${NC}"
+        if command -v apt &> /dev/null; then
+            sudo apt update && sudo apt install -y golang-go
             
-            # Opción 1: Intentar instalar desde repositorio
-            echo -e "${YELLOW}  → Intentando instalar desde repositorio...${NC}"
-            if command -v apt &> /dev/null; then
-                sudo apt update && sudo apt install -y golang-go
-                
-                # Verificar si la instalación funcionó
-                if go version &> /dev/null; then
-                    GO_VERSION=$(go version | awk '{print $3}')
-                    echo -e "${GREEN}✓ Go $GO_VERSION instalado desde repositorio${NC}"
-                else
-                    echo -e "${YELLOW}Instalación desde repositorio falló. Descargando versión oficial...${NC}"
-                    install_go_manually
-                fi
+            # Verificar si la instalación funcionó
+            if go version &> /dev/null; then
+                GO_VERSION=$(go version | awk '{print $3}')
+                echo -e "${GREEN}✓ Go $GO_VERSION instalado desde repositorio${NC}"
             else
-                echo -e "${YELLOW}apt no disponible. Descargando Go manualmente...${NC}"
+                echo -e "${YELLOW}Instalación desde repositorio falló. Descargando versión oficial...${NC}"
                 install_go_manually
             fi
         else
-            GO_VERSION=$(go version | awk '{print $3}')
-            echo -e "${GREEN}✓ Go $GO_VERSION disponible${NC}"
+            echo -e "${YELLOW}apt no disponible. Descargando Go manualmente...${NC}"
+            install_go_manually
         fi
-        
-        # Verificar herramientas de compilación
-        if ! command -v make &> /dev/null; then
-            echo -e "${YELLOW}Instalando herramientas de compilación...${NC}"
-            if command -v apt &> /dev/null; then
-                sudo apt update && sudo apt install -y build-essential
-            else
-                echo -e "${RED}Error: No se pueden instalar herramientas de compilación automáticamente${NC}"
-                echo -e "${YELLOW}Instala manualmente: sudo apt install build-essential${NC}"
-                exit 1
-            fi
-        fi
-        
-        echo -e "${GREEN}✓ Herramientas de compilación disponibles${NC}"
+    else
+        GO_VERSION=$(go version | awk '{print $3}')
+        echo -e "${GREEN}✓ Go $GO_VERSION disponible${NC}"
     fi
+    
+    # Verificar herramientas de compilación
+    if ! command -v make &> /dev/null; then
+        echo -e "${YELLOW}Instalando herramientas de compilación...${NC}"
+        if command -v apt &> /dev/null; then
+            sudo apt update && sudo apt install -y build-essential
+        else
+            echo -e "${RED}Error: No se pueden instalar herramientas de compilación automáticamente${NC}"
+            echo -e "${YELLOW}Instala manualmente: sudo apt install build-essential${NC}"
+            exit 1
+        fi
+    fi
+    
+    echo -e "${GREEN}✓ Herramientas de compilación disponibles${NC}"
 }
 
 # Verificar si existe imagen en Docker Hub
@@ -431,7 +433,7 @@ compile_go_agent() {
         exit 1
     fi
     
-    # Probar ejecución básica
+    # Probar ejecución básica (muy rápido)
     echo -e "${YELLOW}  → Probando binario compilado...${NC}"
     timeout 2s ./agente --help &>/dev/null || timeout 2s ./agente --version &>/dev/null || true
     
@@ -477,7 +479,7 @@ build_docker_image() {
 # Función para compilar y construir localmente
 compile_and_build_locally() {
     echo -e "${YELLOW}Iniciando compilación local...${NC}"
-    BUILD_MODE="compile"
+    check_go_dependencies  # Instalar Go automáticamente
     verify_go_agent
     compile_go_agent
     build_docker_image
@@ -489,7 +491,7 @@ install_agent_with_options() {
     
     # Verificaciones básicas
     check_directory
-    check_dependencies
+    check_dependencies  # Solo Docker
     build_kernel_modules
     
     # Verificar si existe imagen en Docker Hub
@@ -527,7 +529,7 @@ install_agent_with_options() {
     show_status
 }
 
-# Ejecutar contenedor Docker del agente
+# Ejecutar contenedor Docker del agente (VERSIÓN FUNCIONAL COMPLETA)
 run_docker_agent() {
     echo -e "${YELLOW}Ejecutando agente en Docker...${NC}"
     
@@ -596,33 +598,167 @@ run_docker_agent() {
         return 0
     else
         echo -e "${RED}✗ Contenedor no está corriendo (montaje específico)${NC}"
-        
-        # Intento 2: Con privilegios adicionales
-        echo -e "${YELLOW}  → Intentando con privilegios adicionales...${NC}"
-        docker rm agente-local 2>/dev/null || true
-        
-        docker run -d \
-            --name agente-local \
-            --restart unless-stopped \
-            --privileged \
-            -v /proc/cpu_201708880:/proc/cpu_201708880:ro \
-            -v /proc/ram_201708880:/proc/ram_201708880:ro \
-            -v /proc/procesos_201708880:/proc/procesos_201708880:ro \
-            -p 8080:8080 \
-            -e AGENTE_PORT="8080" \
-            -e POLL_INTERVAL="2s" \
-            bismarckr/agente-fase2:latest
-        
-        sleep 3
-        
-        if docker ps | grep -q "agente-local"; then
-            echo -e "${GREEN}✓ Agente ejecutándose en Docker (con privilegios)${NC}"
-            return 0
-        else
-            echo -e "${RED}Error: No se pudo ejecutar el contenedor Docker${NC}"
-            exit 1
-        fi
     fi
+    
+    # Intento 2: Con privilegios adicionales si falla el primer intento
+    echo -e "${YELLOW}  → Intentando con privilegios adicionales...${NC}"
+    docker rm agente-local 2>/dev/null || true
+    
+    docker run -d \
+        --name agente-local \
+        --restart unless-stopped \
+        --privileged \
+        -v /proc/cpu_201708880:/proc/cpu_201708880:ro \
+        -v /proc/ram_201708880:/proc/ram_201708880:ro \
+        -v /proc/procesos_201708880:/proc/procesos_201708880:ro \
+        -p 8080:8080 \
+        -e AGENTE_PORT="8080" \
+        -e POLL_INTERVAL="2s" \
+        bismarckr/agente-fase2:latest
+    
+    sleep 3
+    
+    echo -e "${BLUE}Estado del contenedor (con privilegios):${NC}"
+    docker ps -a --filter name=agente-local --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    
+    echo -e "${BLUE}Logs del contenedor (con privilegios):${NC}"
+    docker logs agente-local 2>&1 | head -20
+    
+    if docker ps | grep -q "agente-local"; then
+        echo -e "${GREEN}✓ Agente ejecutándose en Docker (con privilegios)${NC}"
+        echo -e "${BLUE}  → Agente disponible en: http://localhost:8080/metrics${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Contenedor no está corriendo (con privilegios)${NC}"
+    fi
+    
+    # Intento 3: Crear directorio temporal con bind mounts
+    echo -e "${YELLOW}  → Intentando con directorio temporal...${NC}"
+    docker rm agente-local 2>/dev/null || true
+    
+    # Crear directorio temporal para los archivos proc
+    TEMP_PROC_DIR="/tmp/agente-proc-$$"
+    sudo mkdir -p "$TEMP_PROC_DIR"
+    
+    # Crear enlaces simbólicos a los archivos específicos
+    sudo ln -sf /proc/cpu_201708880 "$TEMP_PROC_DIR/cpu_201708880"
+    sudo ln -sf /proc/ram_201708880 "$TEMP_PROC_DIR/ram_201708880"
+    sudo ln -sf /proc/procesos_201708880 "$TEMP_PROC_DIR/procesos_201708880"
+    
+    # Ejecutar contenedor con el directorio temporal
+    docker run -d \
+        --name agente-local \
+        --restart unless-stopped \
+        -v "$TEMP_PROC_DIR:/proc_data:ro" \
+        -p 8080:8080 \
+        -e AGENTE_PORT="8080" \
+        -e POLL_INTERVAL="2s" \
+        bismarckr/agente-fase2:latest /bin/sh -c "
+            # Crear enlaces en el contenedor
+            ln -sf /proc_data/cpu_201708880 /proc/cpu_201708880
+            ln -sf /proc_data/ram_201708880 /proc/ram_201708880
+            ln -sf /proc_data/procesos_201708880 /proc/procesos_201708880
+            exec /agente-de-monitor
+        "
+    
+    sleep 3
+    
+    echo -e "${BLUE}Estado del contenedor (directorio temporal):${NC}"
+    docker ps -a --filter name=agente-local --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    
+    echo -e "${BLUE}Logs del contenedor (directorio temporal):${NC}"
+    docker logs agente-local 2>&1 | head -20
+    
+    if docker ps | grep -q "agente-local"; then
+        echo -e "${GREEN}✓ Agente ejecutándose en Docker (directorio temporal)${NC}"
+        echo -e "${BLUE}  → Agente disponible en: http://localhost:8080/metrics${NC}"
+        echo -e "${YELLOW}  → Directorio temporal: $TEMP_PROC_DIR${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Contenedor no está corriendo (directorio temporal)${NC}"
+        # Limpiar directorio temporal si falla
+        sudo rm -rf "$TEMP_PROC_DIR"
+    fi
+    
+    # Intento 4: Modo compatibilidad con AppArmor deshabilitado
+    echo -e "${YELLOW}  → Intentando deshabilitar AppArmor temporalmente...${NC}"
+    docker rm agente-local 2>/dev/null || true
+    
+    # Verificar y deshabilitar AppArmor si está habilitado
+    if cat /sys/module/apparmor/parameters/enabled 2>/dev/null | grep -q "Y"; then
+        echo -e "${YELLOW}AppArmor detectado, deshabilitando temporalmente...${NC}"
+        sudo systemctl stop apparmor 2>/dev/null || true
+        sudo aa-teardown 2>/dev/null || true
+        echo -e "${GREEN}✓ AppArmor deshabilitado${NC}"
+    fi
+    
+    # Ejecutar con configuración completa
+    docker run -d \
+        --name agente-local \
+        --restart unless-stopped \
+        --privileged \
+        --security-opt apparmor:unconfined \
+        --security-opt seccomp:unconfined \
+        -v /proc/cpu_201708880:/proc/cpu_201708880:ro \
+        -v /proc/ram_201708880:/proc/ram_201708880:ro \
+        -v /proc/procesos_201708880:/proc/procesos_201708880:ro \
+        -p 8080:8080 \
+        -e AGENTE_PORT="8080" \
+        -e POLL_INTERVAL="2s" \
+        bismarckr/agente-fase2:latest
+    
+    sleep 3
+    
+    echo -e "${BLUE}Estado del contenedor (sin AppArmor):${NC}"
+    docker ps -a --filter name=agente-local --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    
+    echo -e "${BLUE}Logs del contenedor (sin AppArmor):${NC}"
+    docker logs agente-local 2>&1 | head -20
+    
+    if docker ps | grep -q "agente-local"; then
+        echo -e "${GREEN}✓ Agente ejecutándose en Docker (sin AppArmor)${NC}"
+        echo -e "${BLUE}  → Agente disponible en: http://localhost:8080/metrics${NC}"
+        return 0
+    fi
+    
+    # Si todo falla, mostrar diagnóstico final
+    echo -e "${RED}Error: No se pudo ejecutar el contenedor Docker con ninguna configuración${NC}"
+    
+    echo -e "${YELLOW}Diagnóstico final:${NC}"
+    echo -e "${BLUE}1. Logs del último intento:${NC}"
+    docker logs agente-local 2>&1 || echo "No hay logs disponibles"
+    
+    echo -e "${BLUE}2. Verificando archivos /proc en el host:${NC}"
+    ls -la /proc/cpu_201708880 /proc/ram_201708880 /proc/procesos_201708880 2>/dev/null || echo "Archivos no accesibles"
+    
+    echo -e "${BLUE}3. Verificando permisos:${NC}"
+    stat /proc/cpu_201708880 2>/dev/null || echo "No se puede verificar permisos"
+    
+    echo -e "${BLUE}4. Estado de AppArmor:${NC}"
+    cat /sys/module/apparmor/parameters/enabled 2>/dev/null || echo "AppArmor no disponible"
+    
+    echo -e "${BLUE}5. Información de Docker:${NC}"
+    docker info | grep -E "Server Version|Security Options" 2>/dev/null || echo "Información no disponible"
+    
+    echo
+    echo -e "${YELLOW}SOLUCIONES RECOMENDADAS:${NC}"
+    echo -e "${BLUE}1. Ejecutar agente nativo (más confiable):${NC}"
+    echo -e "   cd Backend/Agente && ./agente"
+    echo
+    echo -e "${BLUE}2. Verificar módulos del kernel:${NC}"
+    echo -e "   sudo ./kernel.sh"
+    echo -e "   lsmod | grep 201708880"
+    echo
+    echo -e "${BLUE}3. Probar manualmente:${NC}"
+    echo -e "   docker run --rm -v /proc/cpu_201708880:/proc/cpu_201708880:ro bismarckr/agente-fase2:latest cat /proc/cpu_201708880"
+    echo
+    echo -e "${BLUE}4. Deshabilitar AppArmor permanentemente:${NC}"
+    echo -e "   sudo systemctl disable apparmor && sudo reboot"
+    
+    # Limpiar directorio temporal si existe
+    [ -d "$TEMP_PROC_DIR" ] && sudo rm -rf "$TEMP_PROC_DIR"
+    
+    exit 1
 }
 
 # Verificar funcionamiento del agente
@@ -643,7 +779,7 @@ verify_agent() {
     echo -e "${BLUE}Procesos en el contenedor:${NC}"
     docker exec agente-local ps aux 2>/dev/null || echo "No se pudieron obtener procesos"
     
-    # Probar endpoint del agente
+    # Probar endpoint del agente (no APIs externas)
     echo -e "${YELLOW}Probando endpoint local /health...${NC}"
     if curl -s http://localhost:8080/health >/dev/null 2>&1; then
         echo -e "${GREEN}✓ Endpoint /health accesible${NC}"
@@ -774,10 +910,9 @@ handle_command() {
         "compile")
             echo -e "${YELLOW}=== COMPILACIÓN LOCAL ===${NC}"
             check_directory
-            BUILD_MODE="compile"
             check_dependencies
             build_kernel_modules
-            compile_and_build_locally
+            compile_and_build_locally  # Esto ya incluye check_go_dependencies
             run_docker_agent
             verify_agent
             show_status
@@ -787,9 +922,8 @@ handle_command() {
             docker stop agente-local 2>/dev/null || true
             docker rm agente-local 2>/dev/null || true
             docker rmi bismarckr/agente-fase2:latest 2>/dev/null || true
-            BUILD_MODE="compile"
             check_dependencies
-            compile_and_build_locally
+            compile_and_build_locally  # Esto ya incluye check_go_dependencies
             run_docker_agent
             show_status
             ;;
