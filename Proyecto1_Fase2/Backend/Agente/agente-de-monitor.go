@@ -1,7 +1,6 @@
 package main
 
 import (
-    "bytes"
     "encoding/json"
     "fmt"
     "log"
@@ -34,12 +33,20 @@ type Procesos struct {
     ProcesosParados   int `json:"procesos_parados"`
 }
 
-// MetricsPayload es la estructura que se enviará a la API
-type MetricsPayload struct {
-    Timestamp int64      `json:"timestamp"`
-    CPU       *CPUMetric `json:"cpu"`
-    RAM       *RAMMetric `json:"ram"`
-    Procesos  *Procesos `json:"procesos"`
+// MetricsResponse es la estructura que se enviará como respuesta HTTP
+type MetricsResponse struct {
+    TotalRAM           int64  `json:"total_ram"`
+    RAMLibre           int64  `json:"ram_libre"`
+    UsoRAM             int64  `json:"uso_ram"`
+    PorcentajeRAM      int64  `json:"porcentaje_ram"`
+    PorcentajeCPUUso   int64  `json:"porcentaje_cpu_uso"`
+    PorcentajeCPULibre int64  `json:"porcentaje_cpu_libre"`
+    ProcesosCorriendo  int    `json:"procesos_corriendo"`
+    TotalProcesos      int    `json:"total_procesos"`
+    ProcesosDurmiendo  int    `json:"procesos_durmiendo"`
+    ProcesosZombie     int    `json:"procesos_zombie"`
+    ProcesosParados    int    `json:"procesos_parados"`
+    Hora               string `json:"hora"`
 }
 
 // readProcFile lee un archivo en /proc y devuelve su contenido
@@ -49,26 +56,6 @@ func readProcFile(filePath string) ([]byte, error) {
         return nil, fmt.Errorf("error reading %s: %v", filePath, err)
     }
     return data, nil
-}
-
-// sendMetricsToAPI envía las métricas recolectadas a la API de Node.js
-func sendMetricsToAPI(apiURL string, metrics MetricsPayload) error {
-    jsonData, err := json.Marshal(metrics)
-    if err != nil {
-        return fmt.Errorf("error marshalling metrics: %v", err)
-    }
-
-    resp, err := http.Post(apiURL, "application/json", bytes.NewBuffer(jsonData))
-    if err != nil {
-        return fmt.Errorf("error sending metrics to API: %v", err)
-    }
-    defer resp.Body.Close()
-
-    if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-        return fmt.Errorf("API returned non-200/201 status: %d", resp.StatusCode)
-    }
-
-    return nil
 }
 
 // monitorCPU monitorea la CPU y envía métricas al canal
@@ -94,7 +81,12 @@ func monitorCPU(cpuPath string, interval time.Duration, cpuChan chan<- *CPUMetri
 
         // Enviar métricas al canal
         log.Printf("Métrica de CPU recolectada: %d%%", cpuMetric.PorcentajeUso)
-        cpuChan <- &cpuMetric
+        
+        select {
+        case cpuChan <- &cpuMetric:
+        default:
+            // Canal lleno, descartar métrica antigua
+        }
         
         // Esperar hasta el próximo intervalo
         time.Sleep(interval)
@@ -125,7 +117,12 @@ func monitorRAM(ramPath string, interval time.Duration, ramChan chan<- *RAMMetri
         // Enviar métricas al canal
         log.Printf("Métrica de RAM recolectada: %d%% (Total: %d, Libre: %d, Uso: %d)", 
                   ramMetric.PorcentajeUso, ramMetric.Total, ramMetric.Libre, ramMetric.Uso)
-        ramChan <- &ramMetric
+        
+        select {
+        case ramChan <- &ramMetric:
+        default:
+            // Canal lleno, descartar métrica antigua
+        }
         
         // Esperar hasta el próximo intervalo
         time.Sleep(interval)
@@ -157,62 +154,15 @@ func monitorProcesos(procesosPath string, interval time.Duration, procesosChan c
         log.Printf("Métrica de procesos recolectada: Corriendo: %d, Total: %d, Durmiendo: %d, Zombie: %d, Parados: %d", 
                   procesosMetric.ProcesosCorriendo, procesosMetric.TotalProcesos, 
                   procesosMetric.ProcesosDurmiendo, procesosMetric.ProcesosZombie, procesosMetric.ProcesosParados)
-        procesosChan <- &procesosMetric
+        
+        select {
+        case procesosChan <- &procesosMetric:
+        default:
+            // Canal lleno, descartar métrica antigua
+        }
         
         // Esperar hasta el próximo intervalo
         time.Sleep(interval)
-    }
-}
-
-// procesarMetricas recibe métricas de CPU, RAM, Procesos y las envía a la API
-func procesarMetricas(apiURL string, interval time.Duration, cpuChan <-chan *CPUMetric, ramChan <-chan *RAMMetric, procesosChan <-chan *Procesos, wg *sync.WaitGroup) {
-    defer wg.Done()
-    log.Printf("Iniciando procesamiento de métricas para enviar a %s cada %v", apiURL, interval)
-    
-    // Variables para almacenar las métricas más recientes
-    var lastCPU *CPUMetric
-    var lastRAM *RAMMetric
-    var lastProcesos *Procesos
-    
-    // Ticker para enviar métricas a intervalos regulares
-    ticker := time.NewTicker(interval)
-    
-    for {
-        select {
-        case cpu := <-cpuChan:
-            lastCPU = cpu
-            log.Printf("Recibida nueva métrica de CPU: %d%%", cpu.PorcentajeUso)
-            
-        case ram := <-ramChan:
-            lastRAM = ram
-            log.Printf("Recibida nueva métrica de RAM: %d%%", ram.PorcentajeUso)
-
-        case procesos := <-procesosChan:
-            lastProcesos = procesos
-            log.Printf("Recibida nueva métrica de procesos: Total: %d, Corriendo: %d", procesos.TotalProcesos, procesos.ProcesosCorriendo)
-            
-        case <-ticker.C:
-            // CAMBIAR: Validar que tenemos métricas de los TRES tipos
-            if lastCPU != nil && lastRAM != nil && lastProcesos != nil {
-                metrics := MetricsPayload{
-                    Timestamp: time.Now().Unix(),
-                    CPU:       lastCPU,
-                    RAM:       lastRAM,
-                    Procesos:  lastProcesos, // CAMBIAR: Usar puntero directamente, no desreferenciar
-                }
-                
-                // Enviar métricas a la API
-                if err := sendMetricsToAPI(apiURL, metrics); err != nil {
-                    log.Printf("Error al enviar métricas a la API: %v", err)
-                } else {
-                    log.Printf("Métricas completas enviadas exitosamente a la API")
-                }
-            } else {
-                // CAMBIAR: Mostrar estado de cada métrica
-                log.Printf("Esperando métricas completas antes de enviar... CPU: %v, RAM: %v, Procesos: %v", 
-                          lastCPU != nil, lastRAM != nil, lastProcesos != nil)
-            }
-        }
     }
 }
 
@@ -251,9 +201,9 @@ func main() {
     }
     
     // Crear canales para comunicación entre goroutines
-    cpuChan := make(chan *CPUMetric, 10)
-    ramChan := make(chan *RAMMetric, 10)
-    procesosChan := make(chan *Procesos, 10)
+    cpuChan := make(chan *CPUMetric, 5)
+    ramChan := make(chan *RAMMetric, 5)
+    procesosChan := make(chan *Procesos, 5)
     
     // WaitGroup para esperar a que todas las goroutines terminen
     var wg sync.WaitGroup
@@ -277,20 +227,20 @@ func main() {
                 latestMetrics.Lock()
                 latestMetrics.CPU = cpu
                 latestMetrics.Unlock()
-                log.Printf("Métrica CPU actualizada: %d%%", cpu.Percentage)
+                log.Printf("Métrica CPU actualizada: %d%%", cpu.PorcentajeUso)
                 
             case ram := <-ramChan:
                 latestMetrics.Lock()
                 latestMetrics.RAM = ram
                 latestMetrics.Unlock()
-                log.Printf("Métrica RAM actualizada: %d%%", ram.Percentage)
+                log.Printf("Métrica RAM actualizada: %d%%", ram.PorcentajeUso)
                 
             case procesos := <-procesosChan:
                 latestMetrics.Lock()
                 latestMetrics.Procesos = procesos
                 latestMetrics.Unlock()
                 log.Printf("Métrica Procesos actualizada: Total: %d, Corriendo: %d", 
-                    procesos.Total, procesos.Corriendo)
+                    procesos.TotalProcesos, procesos.ProcesosCorriendo)
             }
         }
     }()
@@ -319,15 +269,52 @@ func main() {
         procesos := latestMetrics.Procesos
         latestMetrics.RUnlock()
         
-        // Crear payload con las métricas más recientes
-        payload := MetricsPayload{
-            CPU:      cpu,
-            RAM:      ram,
-            Procesos: procesos,
+        // Crear respuesta con el formato esperado
+        response := MetricsResponse{
+            // Métricas de RAM (convertir bytes a MB)
+            TotalRAM:      ram.Total / 1024,     // Convertir KB a MB
+            RAMLibre:      ram.Libre * 1024,     // Convertir KB a bytes
+            UsoRAM:        ram.Uso / 1024,       // Convertir KB a MB
+            PorcentajeRAM: ram.PorcentajeUso,
+            
+            // Métricas de CPU
+            PorcentajeCPUUso:   cpu.PorcentajeUso,
+            PorcentajeCPULibre: 100 - cpu.PorcentajeUso,
+            
+            // Métricas de procesos
+            ProcesosCorriendo: procesos.ProcesosCorriendo,
+            TotalProcesos:     procesos.TotalProcesos,
+            ProcesosDurmiendo: procesos.ProcesosDurmiendo,
+            ProcesosZombie:    procesos.ProcesosZombie,
+            ProcesosParados:   procesos.ProcesosParados,
+            
+            // Timestamp formateado
+            Hora: time.Now().Format("2006-01-02 15:04:05"),
+        }
+        
+        // Manejar casos donde las métricas pueden ser nil
+        if cpu == nil {
+            response.PorcentajeCPUUso = 0
+            response.PorcentajeCPULibre = 100
+        }
+        
+        if ram == nil {
+            response.TotalRAM = 0
+            response.RAMLibre = 0
+            response.UsoRAM = 0
+            response.PorcentajeRAM = 0
+        }
+        
+        if procesos == nil {
+            response.ProcesosCorriendo = 0
+            response.TotalProcesos = 0
+            response.ProcesosDurmiendo = 0
+            response.ProcesosZombie = 0
+            response.ProcesosParados = 0
         }
         
         // Enviar respuesta JSON
-        if err := json.NewEncoder(w).Encode(payload); err != nil {
+        if err := json.NewEncoder(w).Encode(response); err != nil {
             log.Printf("Error al codificar métricas: %v", err)
             http.Error(w, "Error interno del servidor", http.StatusInternalServerError)
             return
@@ -341,10 +328,12 @@ func main() {
         w.Header().Set("Content-Type", "application/json")
         w.WriteHeader(http.StatusOK)
         json.NewEncoder(w).Encode(map[string]string{
-            "status": "ok",
-            "agent":  "monitor-agent",
+            "status": "healthy",
+            "agent":  "monitor-agent-fase2",
             "port":   port,
+            "version": "2.0",
         })
+        log.Printf("Health check solicitado por %s", r.RemoteAddr)
     })
     
     // Iniciar servidor HTTP
@@ -353,6 +342,7 @@ func main() {
         log.Printf("Endpoints disponibles:")
         log.Printf("  GET /metrics - Obtener métricas actuales")
         log.Printf("  GET /health  - Estado del agente")
+        log.Printf("Agente listo para recibir peticiones en http://localhost:%s", port)
         
         if err := http.ListenAndServe(":"+port, nil); err != nil {
             log.Fatalf("Error al iniciar servidor HTTP: %v", err)
