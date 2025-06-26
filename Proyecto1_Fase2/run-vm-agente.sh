@@ -42,6 +42,95 @@ check_directory() {
     echo -e "${GREEN}✓ Directorio del proyecto verificado${NC}"
 }
 
+# Función para instalar Go manualmente
+install_go_manually() {
+    echo -e "${YELLOW}Instalando Go manualmente...${NC}"
+    
+    # Detectar arquitectura
+    ARCH=$(uname -m)
+    case $ARCH in
+        x86_64) GO_ARCH="amd64" ;;
+        aarch64) GO_ARCH="arm64" ;;
+        armv7l) GO_ARCH="armv6l" ;;
+        *) 
+            echo -e "${RED}Arquitectura no soportada: $ARCH${NC}"
+            echo -e "${YELLOW}Instala Go manualmente desde: https://golang.org/dl/${NC}"
+            exit 1
+            ;;
+    esac
+    
+    # Versión de Go a descargar
+    GO_VERSION="1.21.5"
+    GO_FILENAME="go${GO_VERSION}.linux-${GO_ARCH}.tar.gz"
+    GO_URL="https://golang.org/dl/${GO_FILENAME}"
+    
+    echo -e "${YELLOW}  → Descargando Go ${GO_VERSION} para ${GO_ARCH}...${NC}"
+    
+    # Crear directorio temporal
+    TEMP_DIR=$(mktemp -d)
+    cd "$TEMP_DIR"
+    
+    # Descargar Go
+    if command -v wget &> /dev/null; then
+        wget -q --show-progress "$GO_URL"
+    elif command -v curl &> /dev/null; then
+        curl -L -o "$GO_FILENAME" "$GO_URL"
+    else
+        echo -e "${RED}Error: wget o curl no están disponibles${NC}"
+        echo -e "${YELLOW}Instala manualmente: sudo apt install wget curl${NC}"
+        exit 1
+    fi
+    
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Error al descargar Go${NC}"
+        echo -e "${YELLOW}Descarga manualmente desde: https://golang.org/dl/${NC}"
+        exit 1
+    fi
+    
+    # Verificar descarga
+    if [ ! -f "$GO_FILENAME" ]; then
+        echo -e "${RED}Error: Archivo Go no se descargó${NC}"
+        exit 1
+    fi
+    
+    echo -e "${YELLOW}  → Instalando Go en /usr/local/go...${NC}"
+    
+    # Remover instalación anterior si existe
+    sudo rm -rf /usr/local/go
+    
+    # Extraer Go
+    sudo tar -C /usr/local -xzf "$GO_FILENAME"
+    
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Error al extraer Go${NC}"
+        exit 1
+    fi
+    
+    # Agregar Go al PATH
+    if ! grep -q "/usr/local/go/bin" ~/.bashrc; then
+        echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+        echo -e "${YELLOW}  → Agregado Go al PATH en ~/.bashrc${NC}"
+    fi
+    
+    # Agregar al PATH actual
+    export PATH=$PATH:/usr/local/go/bin
+    
+    # Limpiar archivos temporales
+    cd - > /dev/null
+    rm -rf "$TEMP_DIR"
+    
+    # Verificar instalación
+    if go version &> /dev/null; then
+        GO_VERSION_INSTALLED=$(go version | awk '{print $3}')
+        echo -e "${GREEN}✓ Go $GO_VERSION_INSTALLED instalado exitosamente${NC}"
+        echo -e "${YELLOW}  → Reinicia la terminal o ejecuta: source ~/.bashrc${NC}"
+    else
+        echo -e "${RED}Error: Go no se instaló correctamente${NC}"
+        echo -e "${YELLOW}Verifica manualmente: /usr/local/go/bin/go version${NC}"
+        exit 1
+    fi
+}
+
 # Verificar dependencias del sistema
 check_dependencies() {
     echo -e "${YELLOW}Verificando dependencias del sistema...${NC}"
@@ -63,25 +152,46 @@ check_dependencies() {
     
     # Verificar Go (solo si vamos a compilar)
     if [ "${BUILD_MODE}" = "compile" ]; then
+        # Verificar si Go ya está en PATH
         if [ -d "/usr/local/go/bin" ] && [[ ":$PATH:" != *":/usr/local/go/bin:"* ]]; then
             export PATH=$PATH:/usr/local/go/bin
         fi
         
         if ! go version &> /dev/null; then
-            echo -e "${RED}Error: Go no está instalado${NC}"
-            echo -e "${YELLOW}Instala Go: sudo apt install golang-go${NC}"
-            echo -e "${YELLOW}O descarga desde: https://golang.org/dl/${NC}"
-            exit 1
+            echo -e "${YELLOW}Go no está instalado. Instalando automáticamente...${NC}"
+            
+            # Opción 1: Intentar instalar desde repositorio
+            echo -e "${YELLOW}  → Intentando instalar desde repositorio...${NC}"
+            if command -v apt &> /dev/null; then
+                sudo apt update && sudo apt install -y golang-go
+                
+                # Verificar si la instalación funcionó
+                if go version &> /dev/null; then
+                    GO_VERSION=$(go version | awk '{print $3}')
+                    echo -e "${GREEN}✓ Go $GO_VERSION instalado desde repositorio${NC}"
+                else
+                    echo -e "${YELLOW}Instalación desde repositorio falló. Descargando versión oficial...${NC}"
+                    install_go_manually
+                fi
+            else
+                echo -e "${YELLOW}apt no disponible. Descargando Go manualmente...${NC}"
+                install_go_manually
+            fi
+        else
+            GO_VERSION=$(go version | awk '{print $3}')
+            echo -e "${GREEN}✓ Go $GO_VERSION disponible${NC}"
         fi
-        
-        GO_VERSION=$(go version | awk '{print $3}')
-        echo -e "${GREEN}✓ Go $GO_VERSION disponible${NC}"
         
         # Verificar herramientas de compilación
         if ! command -v make &> /dev/null; then
-            echo -e "${RED}Error: make no está instalado${NC}"
-            echo -e "${YELLOW}Instala: sudo apt install build-essential${NC}"
-            exit 1
+            echo -e "${YELLOW}Instalando herramientas de compilación...${NC}"
+            if command -v apt &> /dev/null; then
+                sudo apt update && sudo apt install -y build-essential
+            else
+                echo -e "${RED}Error: No se pueden instalar herramientas de compilación automáticamente${NC}"
+                echo -e "${YELLOW}Instala manualmente: sudo apt install build-essential${NC}"
+                exit 1
+            fi
         fi
         
         echo -e "${GREEN}✓ Herramientas de compilación disponibles${NC}"
@@ -321,7 +431,7 @@ compile_go_agent() {
         exit 1
     fi
     
-    # Probar ejecución básica (muy rápido)
+    # Probar ejecución básica
     echo -e "${YELLOW}  → Probando binario compilado...${NC}"
     timeout 2s ./agente --help &>/dev/null || timeout 2s ./agente --version &>/dev/null || true
     
@@ -486,10 +596,33 @@ run_docker_agent() {
         return 0
     else
         echo -e "${RED}✗ Contenedor no está corriendo (montaje específico)${NC}"
+        
+        # Intento 2: Con privilegios adicionales
+        echo -e "${YELLOW}  → Intentando con privilegios adicionales...${NC}"
+        docker rm agente-local 2>/dev/null || true
+        
+        docker run -d \
+            --name agente-local \
+            --restart unless-stopped \
+            --privileged \
+            -v /proc/cpu_201708880:/proc/cpu_201708880:ro \
+            -v /proc/ram_201708880:/proc/ram_201708880:ro \
+            -v /proc/procesos_201708880:/proc/procesos_201708880:ro \
+            -p 8080:8080 \
+            -e AGENTE_PORT="8080" \
+            -e POLL_INTERVAL="2s" \
+            bismarckr/agente-fase2:latest
+        
+        sleep 3
+        
+        if docker ps | grep -q "agente-local"; then
+            echo -e "${GREEN}✓ Agente ejecutándose en Docker (con privilegios)${NC}"
+            return 0
+        else
+            echo -e "${RED}Error: No se pudo ejecutar el contenedor Docker${NC}"
+            exit 1
+        fi
     fi
-    
-    # Si falla, continuar con intentos adicionales (código existente)...
-    # [Resto del código de run_docker_agent permanece igual]
 }
 
 # Verificar funcionamiento del agente
