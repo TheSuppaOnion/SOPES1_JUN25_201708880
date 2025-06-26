@@ -25,24 +25,15 @@ spec:
         - containerPort: 5000
         env:
         - name: DB_HOST
-          value: "mysql-service"
+          value: "host.minikube.internal"
         - name: DB_PORT
           value: "3306"
         - name: DB_USER
-          valueFrom:
-            secretKeyRef:
-              name: mysql-secret
-              key: mysql-user
+          value: "monitor"
         - name: DB_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: mysql-secret
-              key: mysql-password
+          value: "monitor123"
         - name: DB_NAME
-          valueFrom:
-            secretKeyRef:
-              name: mysql-secret
-              key: mysql-database
+          value: "monitoring"
         resources:
           requests:
             memory: "256Mi"

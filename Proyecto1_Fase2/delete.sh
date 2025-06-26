@@ -107,4 +107,3 @@ echo -e "${GREEN}============================================================${N
 echo -e "${GREEN}              LIMPIEZA COMPLETA FINALIZADA                ${NC}"
 echo -e "${GREEN}============================================================${NC}"
 echo -e "${GREEN}Todos los servicios del proyecto han sido eliminados.${NC}"
-echo -e "${YELLOW}Para volver a desplegar, ejecuta: ./run.sh${NC}"

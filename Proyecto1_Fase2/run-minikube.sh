@@ -183,12 +183,34 @@ if [ $? -ne 0 ]; then
 fi
 
 # Desplegar en Kubernetes
-echo -e "${YELLOW}Desplegando aplicación en Kubernetes...${NC}"
-./k8s/scripts/deploy-local.sh
-if [ $? -ne 0 ]; then
-    echo -e "${RED}Error al desplegar en Kubernetes.${NC}"
-    exit 1
-fi
+echo -e "${YELLOW}Desplegando en Kubernetes (solo APIs)...${NC}"
+cd k8s/manifests
+
+# Crear namespace
+echo -e "${YELLOW}Creando namespace...${NC}"
+kubectl apply -f namespace.yaml
+
+# Desplegar solo las APIs que van en K8s
+echo -e "${YELLOW}Desplegando API Node.js...${NC}"
+kubectl apply -f api-nodejs/
+
+echo -e "${YELLOW}Desplegando API Python...${NC}"
+kubectl apply -f api-python/
+
+echo -e "${YELLOW}Desplegando WebSocket API...${NC}"
+kubectl apply -f websocket-api/
+
+echo -e "${YELLOW}Desplegando Ingress...${NC}"
+kubectl apply -f ingress/
+
+# Esperar a que estén listas
+echo -e "${YELLOW}Esperando a que las APIs estén listas...${NC}"
+kubectl wait --for=condition=ready pod -l app=api-nodejs -n so1-fase2 --timeout=180s
+kubectl wait --for=condition=ready pod -l app=api-python -n so1-fase2 --timeout=180s
+kubectl wait --for=condition=ready pod -l app=websocket-api -n so1-fase2 --timeout=180s
+
+cd ../..
+
 
 echo
 echo -e "${GREEN} APLICACIÓN DESPLEGADA EXITOSAMENTE EN KUBERNETES 🎉${NC}"
