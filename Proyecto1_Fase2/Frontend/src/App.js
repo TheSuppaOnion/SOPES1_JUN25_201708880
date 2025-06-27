@@ -9,9 +9,9 @@ import {
   Title,
   Tooltip,
   Legend,
-  ArcElement,  // ← AÑADIR para gráficas pie
+  ArcElement,
 } from 'chart.js';
-import { Pie } from 'react-chartjs-2';  // ← CAMBIAR de Line a Pie
+import { Pie } from 'react-chartjs-2';
 import './App.css';
 import config from './config';
 
@@ -23,18 +23,19 @@ ChartJS.register(
   Title,
   Tooltip,
   Legend,
-  ArcElement  // ← AÑADIR
+  ArcElement
 );
 
-// Usar la configuración dinámica
 const WEBSOCKET_URL = config.WEBSOCKET_URL;
 
 function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [processes, setProcesses] = useState([]);
+  const [connectionAttempts, setConnectionAttempts] = useState(0);
+  const [lastDataReceived, setLastDataReceived] = useState(null);
   
-  // Datos para gráficas pie (como Fase 1)
+  // Datos iniciales para gráficas pie
   const [cpuData, setCpuData] = useState({
     labels: ['En Uso', 'Libre'],
     datasets: [{
@@ -81,68 +82,113 @@ function App() {
   };
 
   useEffect(() => {
-    console.log('Conectando a WebSocket:', WEBSOCKET_URL);
+    console.log('Iniciando conexión WebSocket a:', WEBSOCKET_URL);
     
+    // Configurar socket solo para ESCUCHAR
     socketRef.current = io(WEBSOCKET_URL, {
       transports: ['websocket', 'polling'],
-      timeout: 20000,
+      timeout: 10000,
       reconnection: true,
-      reconnectionDelay: 2000,
-      reconnectionAttempts: 5
+      reconnectionDelay: 3000,
+      reconnectionAttempts: 10,
+      forceNew: true
     });
 
     const socket = socketRef.current;
 
+    // EVENTOS DE CONEXIÓN
     socket.on('connect', () => {
-      console.log('Conectado al WebSocket');
+      console.log('✓ Conectado al WebSocket API');
       setIsConnected(true);
-      socket.emit('request_metrics');
+      setConnectionAttempts(0);
+      
+      // NO enviar request_metrics - Solo esperar datos automáticos
+      console.log('Frontend listo para recibir datos automáticos...');
     });
 
-    socket.on('disconnect', () => {
-      console.log('Desconectado del WebSocket');
+    socket.on('disconnect', (reason) => {
+      console.log('X Desconectado del WebSocket. Razón:', reason);
       setIsConnected(false);
     });
 
     socket.on('connect_error', (error) => {
-      console.error('Error de conexión:', error);
+      console.error('X Error de conexión WebSocket:', error.message);
       setIsConnected(false);
+      setConnectionAttempts(prev => prev + 1);
     });
 
+    socket.on('reconnect', (attemptNumber) => {
+      console.log(`✓ Reconectado después de ${attemptNumber} intentos`);
+      setIsConnected(true);
+    });
+
+    socket.on('reconnect_error', (error) => {
+      console.error('X Error en reconexión:', error.message);
+    });
+
+    // EVENTOS DE DATOS - SOLO ESCUCHAR
+    socket.on('welcome', (data) => {
+      console.log('✓ Mensaje de bienvenida:', data);
+    });
+
+    // EVENTO PRINCIPAL: Recibir métricas automáticamente
     socket.on('metrics_update', (data) => {
-      console.log('Métricas recibidas:', data);
+      console.log('✓ Métricas recibidas automáticamente:', {
+        timestamp: data.timestamp,
+        cpu: data.cpu?.porcentaje_uso,
+        ram: data.ram?.porcentaje_uso,
+        procesos: data.procesos?.total_procesos,
+        api_source: data.api_source
+      });
+      
       updateCharts(data);
       updateProcessTable(data);
-      setLastUpdate(new Date().toLocaleString());
+      setLastUpdate(new Date().toLocaleString('es-GT', {
+        timeZone: 'America/Guatemala'
+      }));
+      setLastDataReceived(data);
     });
 
-    socket.on('welcome', (data) => {
-      console.log('Bienvenida:', data);
+    // Otros eventos de datos automáticos
+    socket.on('historical_data', (data) => {
+      console.log('✓ Datos históricos recibidos:', data);
+    });
+
+    socket.on('system_stats', (data) => {
+      console.log('✓ Estadísticas del sistema recibidas:', data);
     });
 
     socket.on('error', (error) => {
-      console.error('Error del servidor:', error);
+      console.error('X Error del WebSocket API:', error);
     });
 
+    // Cleanup al desmontar
     return () => {
+      console.log('Desconectando WebSocket...');
       if (socket) {
+        socket.removeAllListeners();
         socket.disconnect();
       }
     };
-  }, []);
+  }, []); // Solo ejecutar una vez
 
+  // Función para actualizar gráficas con datos recibidos
   const updateCharts = (data) => {
-    if (!data.cpu || !data.ram) return;
+    if (!data || !data.cpu || !data.ram) {
+      console.warn('Datos incompletos recibidos:', data);
+      return;
+    }
 
-    const cpuUsage = data.cpu.porcentaje_uso || 0;
-    const ramUsage = data.ram.porcentaje_uso || 0;
+    const cpuUsage = Math.round((data.cpu.porcentaje_uso || 0) * 100) / 100;
+    const ramUsage = Math.round((data.ram.porcentaje_uso || 0) * 100) / 100;
 
     // Actualizar gráfica pie de CPU
     setCpuData(prevData => ({
       ...prevData,
       datasets: [{
         ...prevData.datasets[0],
-        data: [cpuUsage, 100 - cpuUsage]
+        data: [cpuUsage, 100 - cpuUsage],
+        label: `CPU: ${cpuUsage}%`
       }]
     }));
 
@@ -151,13 +197,18 @@ function App() {
       ...prevData,
       datasets: [{
         ...prevData.datasets[0],
-        data: [ramUsage, 100 - ramUsage]
+        data: [ramUsage, 100 - ramUsage],
+        label: `RAM: ${ramUsage}% (${data.ram.total_gb?.toFixed(1) || 'N/A'} GB)`
       }]
     }));
   };
 
+  // Función para actualizar tabla de procesos con datos recibidos
   const updateProcessTable = (data) => {
-    if (!data.procesos) return;
+    if (!data || !data.procesos) {
+      console.warn('Datos de procesos incompletos:', data);
+      return;
+    }
 
     const processInfo = [
       {
@@ -176,7 +227,7 @@ function App() {
         id: 3,
         estado: 'Zombie',
         cantidad: data.procesos.procesos_zombie || 0,
-        descripción: 'Procesos terminados pero no eliminados'
+        descripcion: 'Procesos terminados pero no eliminados'
       },
       {
         id: 4,
@@ -187,7 +238,7 @@ function App() {
       {
         id: 5,
         estado: 'Total',
-        cantidad: data.procesos.total_processos || 0,
+        cantidad: data.procesos.total_procesos || 0,
         descripcion: 'Total de procesos en el sistema'
       }
     ];
@@ -198,13 +249,28 @@ function App() {
   return (
     <div className="App">
       <header className="App-header">
-        <h1>Monitor de Sistema en Tiempo Real</h1>
+        <h1>Monitor de Sistema en Tiempo Real - Fase 2</h1>
+        <p>Bismarck Romero - 201708880</p>
+        
         <div className={`connection-status ${isConnected ? 'connected' : 'disconnected'}`}>
-          {isConnected ? 'Conectado' : 'Desconectado'}
+          {isConnected ? '✓ Conectado - Esperando datos...' : 'X Desconectado'}
+          {connectionAttempts > 0 && !isConnected && (
+            <span> (Intentos: {connectionAttempts})</span>
+          )}
         </div>
+        
         {lastUpdate && (
           <div className="last-update">
             Última actualización: {lastUpdate}
+            {lastDataReceived?.api_source && (
+              <span> | Fuente: API {lastDataReceived.api_source}</span>
+            )}
+          </div>
+        )}
+        
+        {!isConnected && (
+          <div style={{ color: '#ffcccb', fontSize: '0.9em', marginTop: '10px' }}>
+            Esperando conexión con WebSocket API en {WEBSOCKET_URL}
           </div>
         )}
       </header>
@@ -219,7 +285,7 @@ function App() {
                 ...chartOptions.plugins,
                 title: {
                   display: true,
-                  text: 'CPU Usage'
+                  text: `CPU: ${cpuData.datasets[0].data[0]}% en uso`
                 }
               }
             }} />
@@ -235,7 +301,7 @@ function App() {
                 ...chartOptions.plugins,
                 title: {
                   display: true,
-                  text: 'RAM Usage'
+                  text: `RAM: ${ramData.datasets[0].data[0]}% en uso`
                 }
               }
             }} />
@@ -254,13 +320,21 @@ function App() {
                 </tr>
               </thead>
               <tbody>
-                {processes.map(process => (
-                  <tr key={process.id} className={process.estado.toLowerCase()}>
-                    <td className="estado">{process.estado}</td>
-                    <td className="cantidad">{process.cantidad.toLocaleString()}</td>
-                    <td className="descripcion">{process.descripcion}</td>
+                {processes.length > 0 ? (
+                  processes.map(process => (
+                    <tr key={process.id} className={process.estado.toLowerCase()}>
+                      <td className="estado">{process.estado}</td>
+                      <td className="cantidad">{process.cantidad.toLocaleString()}</td>
+                      <td className="descripcion">{process.descripcion}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="3" style={{ textAlign: 'center', fontStyle: 'italic', color: '#666' }}>
+                      Esperando datos de procesos...
+                    </td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>
@@ -269,7 +343,8 @@ function App() {
 
       <footer className="App-footer">
         <p>Sistema de Monitoreo - USAC Sistemas Operativos 1</p>
-        <p>Bismarck Romero - 201708880</p>
+        <p>Frontend React - Solo recibe datos via WebSocket</p>
+        <p>Flujo: Locust → APIs → BD → WebSocket API → Frontend</p>
       </footer>
     </div>
   );

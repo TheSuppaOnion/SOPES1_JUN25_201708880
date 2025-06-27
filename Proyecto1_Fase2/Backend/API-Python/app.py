@@ -1,22 +1,14 @@
 from flask import Flask, request, jsonify
-from flask_cors import CORS
 import mysql.connector
+from mysql.connector import pooling
 import os
-import json
 from datetime import datetime
-import logging
-import time
-
-# Configuración de logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-CORS(app)
 
-# Configuración de base de datos
+# Configuración de base de datos para MySQL local
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'localhost'),
+    'host': os.getenv('DB_HOST', '192.168.49.1'),
     'port': int(os.getenv('DB_PORT', 3306)),
     'user': os.getenv('DB_USER', 'monitor'),
     'password': os.getenv('DB_PASSWORD', 'monitor123'),
@@ -25,306 +17,235 @@ DB_CONFIG = {
     'autocommit': True
 }
 
-def get_db_connection():
-    """Crear conexión a la base de datos con reintentos"""
-    max_retries = 5
-    retry_delay = 2
-    
-    for attempt in range(max_retries):
-        try:
-            connection = mysql.connector.connect(**DB_CONFIG)
-            logger.info("Conexión a base de datos exitosa")
-            return connection
-        except mysql.connector.Error as err:
-            logger.error(f"Intento {attempt + 1}/{max_retries} - Error conectando a BD: {err}")
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-                retry_delay *= 2  # Backoff exponencial
-            else:
-                raise err
-    return None
+# Pool de conexiones
+connection_pool = None
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Health check para Kubernetes"""
+def initialize_database():
+    global connection_pool
     try:
-        conn = get_db_connection()
-        if conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1")
-            cursor.close()
-            conn.close()
-            
-            return jsonify({
-                "status": "healthy",
-                "api": "Python",
-                "timestamp": datetime.now().isoformat(),
-                "database": "connected"
-            }), 200
-        else:
-            return jsonify({
-                "status": "unhealthy",
-                "api": "Python", 
-                "error": "Database connection failed"
-            }), 503
-            
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return jsonify({
-            "status": "unhealthy",
-            "api": "Python",
-            "error": str(e)
-        }), 503
+        connection_pool = pooling.MySQLConnectionPool(
+            pool_name="api_python_pool",
+            pool_size=5,
+            pool_reset_session=True,
+            **DB_CONFIG
+        )
+        
+        # Probar conexión
+        test_conn = connection_pool.get_connection()
+        print("✓ Conectado a MySQL desde API Python")
+        test_conn.close()
+        
+        # Crear tabla si no existe
+        create_tables()
+        
+    except Exception as error:
+        print(f"X Error conectando a MySQL: {error}")
+        raise error
 
-@app.route('/api/data', methods=['POST'])
-def receive_metrics():
-    """
-    Endpoint principal para recibir métricas del agente Go
-    Ruta 1 del Traffic Split - API Python
-    """
+def create_tables():
     try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No data provided", "api": "Python"}), 400
-            
-        logger.info(f"Datos recibidos en API Python: {data}")
-        
-        # Procesar datos según formato del agente Go
-        timestamp = int(time.time())
-        
-        # Extraer métricas de CPU
-        cpu_data = data.get('cpu', {})
-        cpu_usage = cpu_data.get('porcentajeUso', 0)
-        
-        # Extraer métricas de RAM  
-        ram_data = data.get('ram', {})
-        ram_total = ram_data.get('total', 0)
-        ram_libre = ram_data.get('libre', 0) 
-        ram_uso = ram_data.get('uso', 0)
-        ram_percentage = ram_data.get('porcentajeUso', 0)
-        
-        # Extraer métricas de procesos
-        process_data = data.get('procesos', {})
-        processes_running = process_data.get('procesos_corriendo', 0)
-        processes_total = process_data.get('total_processos', 0)
-        processes_sleeping = process_data.get('procesos_durmiendo', 0)
-        processes_zombie = process_data.get('procesos_zombie', 0)
-        processes_stopped = process_data.get('procesos_parados', 0)
-        
-        # Guardar en base de datos
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({"error": "Database connection failed", "api": "Python"}), 500
-            
+        conn = connection_pool.get_connection()
         cursor = conn.cursor()
         
-        # Insertar métricas de CPU
-        cpu_query = """
-        INSERT INTO cpu_metrics (timestamp, porcentaje_uso) 
-        VALUES (%s, %s)
+        create_table_query = """
+        CREATE TABLE IF NOT EXISTS metrics (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            total_ram INT,
+            ram_libre BIGINT,
+            uso_ram INT,
+            porcentaje_ram DECIMAL(5,2),
+            porcentaje_cpu_uso DECIMAL(5,2),
+            porcentaje_cpu_libre DECIMAL(5,2),
+            procesos_corriendo INT,
+            total_procesos INT,
+            procesos_durmiendo INT,
+            procesos_zombie INT,
+            procesos_parados INT,
+            hora VARCHAR(50),
+            api_source VARCHAR(20) DEFAULT 'python'
+        )
         """
-        cursor.execute(cpu_query, (timestamp, cpu_usage))
         
-        # Insertar métricas de RAM
-        ram_query = """
-        INSERT INTO ram_metrics (timestamp, total, libre, uso, porcentaje_uso) 
-        VALUES (%s, %s, %s, %s, %s)
+        cursor.execute(create_table_query)
+        print("✓ Tabla metrics verificada/creada")
+        
+    except Exception as error:
+        print(f"X Error creando tabla: {error}")
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+# ENDPOINT PRINCIPAL - Recibir datos de Locust via Ingress
+@app.route('/api/data', methods=['POST'])
+def receive_data():
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'No se recibieron datos JSON'
+            }), 400
+        
+        # Validar datos requeridos
+        if 'total_ram' not in data or 'porcentaje_cpu_uso' not in data:
+            return jsonify({
+                'success': False,
+                'error': 'Datos faltantes: total_ram y porcentaje_cpu_uso son requeridos'
+            }), 400
+        
+        # Insertar en base de datos
+        conn = connection_pool.get_connection()
+        cursor = conn.cursor()
+        
+        insert_query = """
+        INSERT INTO metrics (
+            total_ram, ram_libre, uso_ram, porcentaje_ram,
+            porcentaje_cpu_uso, porcentaje_cpu_libre,
+            procesos_corriendo, total_procesos, procesos_durmiendo,
+            procesos_zombie, procesos_parados, hora, api_source
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
-        cursor.execute(ram_query, (timestamp, ram_total, ram_libre, ram_uso, ram_percentage))
         
-        # Insertar métricas de procesos
-        process_query = """
-        INSERT INTO procesos_metrics 
-        (timestamp, procesos_corriendo, total_processos, procesos_durmiendo, procesos_zombie, procesos_parados) 
-        VALUES (%s, %s, %s, %s, %s, %s)
-        """
-        cursor.execute(process_query, (timestamp, processes_running, processes_total, 
-                                     processes_sleeping, processes_zombie, processes_stopped))
+        values = (
+            data.get('total_ram', 0),
+            data.get('ram_libre', 0),
+            data.get('uso_ram', 0),
+            data.get('porcentaje_ram', 0),
+            data.get('porcentaje_cpu_uso', 0),
+            data.get('porcentaje_cpu_libre', 0),
+            data.get('procesos_corriendo', 0),
+            data.get('total_procesos', 0),
+            data.get('procesos_durmiendo', 0),
+            data.get('procesos_zombie', 0),
+            data.get('procesos_parados', 0),
+            data.get('hora', datetime.now().isoformat()),
+            'python'
+        )
         
-        # Insertar en caché para respuesta rápida
-        cache_data = {
-            "total_ram": int(ram_total / 1024) if ram_total > 0 else 0,
-            "ram_libre": ram_libre,
-            "uso_ram": int(ram_uso / 1024) if ram_uso > 0 else 0,
-            "porcentaje_ram": ram_percentage,
-            "porcentaje_cpu_uso": cpu_usage,
-            "porcentaje_cpu_libre": 100 - cpu_usage,
-            "procesos_corriendo": processes_running,
-            "total_procesos": processes_total,
-            "procesos_durmiendo": processes_sleeping,
-            "procesos_zombie": processes_zombie,
-            "procesos_parados": processes_stopped,
-            "hora": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            "api": "Python"  # Identificador de la API
-        }
+        cursor.execute(insert_query, values)
+        row_id = cursor.lastrowid
         
-        # Actualizar caché
-        cache_queries = [
-            ("cpu", json.dumps({"porcentaje_uso": cpu_usage})),
-            ("ram", json.dumps({
-                "total": ram_total, "libre": ram_libre, 
-                "uso": ram_uso, "porcentaje_uso": ram_percentage
-            })),
-            ("procesos", json.dumps({
-                "procesos_corriendo": processes_running,
-                "total_processos": processes_total,
-                "procesos_durmiendo": processes_sleeping,
-                "procesos_zombie": processes_zombie,
-                "procesos_parados": processes_stopped
-            }))
-        ]
-        
-        for cache_id, cache_json in cache_queries:
-            cache_query = """
-            INSERT INTO metrics_cache (id, timestamp, data) 
-            VALUES (%s, %s, %s)
-            ON DUPLICATE KEY UPDATE timestamp = %s, data = %s
-            """
-            cursor.execute(cache_query, (cache_id, timestamp, cache_json, timestamp, cache_json))
-        
-        cursor.close()
-        conn.close()
-        
-        logger.info(f"Métricas guardadas exitosamente por API Python")
+        print(f"✓ Datos recibidos y guardados: ID={row_id}, CPU={data.get('porcentaje_cpu_uso')}, RAM={data.get('porcentaje_ram')}, Procesos={data.get('total_procesos')}")
         
         return jsonify({
-            "message": "Metrics saved successfully",
-            "api": "Python",
-            "timestamp": timestamp,
-            "data": cache_data
+            'success': True,
+            'message': 'Datos guardados correctamente en API Python',
+            'id': row_id,
+            'timestamp': datetime.now().isoformat(),
+            'api': 'python'
         }), 201
         
-    except mysql.connector.Error as db_err:
-        logger.error(f"Error de base de datos: {db_err}")
+    except Exception as error:
+        print(f"X Error procesando datos: {error}")
         return jsonify({
-            "error": "Database error",
-            "api": "Python",
-            "details": str(db_err)
+            'success': False,
+            'error': 'Error interno del servidor',
+            'api': 'python'
         }), 500
-        
-    except Exception as e:
-        logger.error(f"Error procesando solicitud: {e}")
-        return jsonify({
-            "error": "Internal server error",
-            "api": "Python",
-            "details": str(e)
-        }), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
 
-@app.route('/api/metrics/python', methods=['GET'])
-def get_python_metrics():
-    """Obtener métricas procesadas específicamente por la API Python"""
+# Endpoint para obtener métricas (para frontend)
+@app.route('/api/metrics', methods=['GET'])
+def get_metrics():
     try:
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({"error": "Database connection failed"}), 500
-            
+        conn = connection_pool.get_connection()
         cursor = conn.cursor(dictionary=True)
         
-        # Obtener últimas métricas de cada tipo
-        queries = {
-            "cpu": "SELECT * FROM cpu_metrics ORDER BY timestamp DESC LIMIT 10",
-            "ram": "SELECT * FROM ram_metrics ORDER BY timestamp DESC LIMIT 10", 
-            "procesos": "SELECT * FROM procesos_metrics ORDER BY timestamp DESC LIMIT 10"
+        query = """
+        SELECT * FROM metrics 
+        ORDER BY timestamp DESC 
+        LIMIT 1
+        """
+        
+        cursor.execute(query)
+        result = cursor.fetchone()
+        
+        if not result:
+            return jsonify({
+                'cpu': {'porcentaje_uso': 0},
+                'ram': {'porcentaje_uso': 0, 'total_gb': 0, 'libre_gb': 0},
+                'procesos': {'total_procesos': 0, 'procesos_corriendo': 0}
+            })
+        
+        response = {
+            'cpu': {
+                'porcentaje_uso': float(result.get('porcentaje_cpu_uso', 0))
+            },
+            'ram': {
+                'porcentaje_uso': float(result.get('porcentaje_ram', 0)),
+                'total_gb': (result.get('total_ram', 0) or 0) / 1024,
+                'libre_gb': (result.get('ram_libre', 0) or 0) / (1024 * 1024 * 1024)
+            },
+            'procesos': {
+                'total_procesos': result.get('total_procesos', 0),
+                'procesos_corriendo': result.get('procesos_corriendo', 0),
+                'procesos_durmiendo': result.get('procesos_durmiendo', 0),
+                'procesos_zombie': result.get('procesos_zombie', 0),
+                'procesos_parados': result.get('procesos_parados', 0)
+            },
+            'timestamp': result.get('timestamp'),
+            'api_source': result.get('api_source')
         }
         
-        results = {}
-        for metric_type, query in queries.items():
-            cursor.execute(query)
-            results[metric_type] = cursor.fetchall()
+        return jsonify(response)
         
-        cursor.close()
-        conn.close()
-        
-        return jsonify({
-            "api": "Python",
-            "timestamp": datetime.now().isoformat(),
-            "data": results,
-            "total_records": sum(len(records) for records in results.values())
-        }), 200
-        
-    except Exception as e:
-        logger.error(f"Error obteniendo métricas: {e}")
-        return jsonify({
-            "error": "Error retrieving metrics",
-            "api": "Python"
-        }), 500
+    except Exception as error:
+        print(f"X Error obteniendo métricas: {error}")
+        return jsonify({'error': 'Error obteniendo métricas'}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
 
-@app.route('/api/stats/python', methods=['GET'])
-def get_python_stats():
-    """Estadísticas específicas de la API Python"""
-    try:
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({"error": "Database connection failed"}), 500
-            
-        cursor = conn.cursor(dictionary=True)
-        
-        # Contar registros por tabla
-        stats = {}
-        tables = ['cpu_metrics', 'ram_metrics', 'procesos_metrics']
-        
-        for table in tables:
-            cursor.execute(f"SELECT COUNT(*) as count FROM {table}")
-            result = cursor.fetchone()
-            stats[table] = result['count'] if result else 0
-        
-        # Obtener rango de fechas
-        cursor.execute("""
-            SELECT 
-                MIN(FROM_UNIXTIME(timestamp)) as oldest,
-                MAX(FROM_UNIXTIME(timestamp)) as newest
-            FROM cpu_metrics
-        """)
-        date_range = cursor.fetchone()
-        
-        cursor.close()
-        conn.close()
-        
-        return jsonify({
-            "api": "Python",
-            "timestamp": datetime.now().isoformat(),
-            "database_stats": stats,
-            "date_range": date_range,
-            "total_records": sum(stats.values())
-        }), 200
-        
-    except Exception as e:
-        logger.error(f"Error obteniendo estadísticas: {e}")
-        return jsonify({
-            "error": "Error retrieving stats",
-            "api": "Python"
-        }), 500
-
-@app.route('/', methods=['GET'])
-def root():
-    """Endpoint raíz con información de la API"""
+# Health check
+@app.route('/health', methods=['GET'])
+def health_check():
     return jsonify({
-        "service": "Sistema de Monitoreo - API Python",
-        "version": "2.0.0",
-        "author": "Bismarck Romero - 201708880",
-        "description": "Ruta 1 del Traffic Split - API desarrollada en Python/Flask",
-        "endpoints": [
-            "GET /health - Health check",
-            "POST /api/data - Recibir métricas del agente", 
-            "GET /api/metrics/python - Métricas procesadas por Python",
-            "GET /api/stats/python - Estadísticas de la API Python"
-        ],
-        "timestamp": datetime.now().isoformat()
-    }), 200
+        'status': 'healthy',
+        'service': 'api-python',
+        'timestamp': datetime.now().isoformat(),
+        'database': 'connected' if connection_pool else 'disconnected'
+    })
+
+# Estadísticas
+@app.route('/api/stats', methods=['GET'])
+def get_stats():
+    try:
+        conn = connection_pool.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT COUNT(*) as total FROM metrics')
+        total_count = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) as python_total FROM metrics WHERE api_source = "python"')
+        python_count = cursor.fetchone()[0]
+        
+        return jsonify({
+            'total_records': total_count,
+            'python_records': python_count,
+            'api': 'python'
+        })
+        
+    except Exception as error:
+        return jsonify({'error': 'Error obteniendo estadísticas'}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
 
 if __name__ == '__main__':
-    logger.info("Iniciando API Python - Ruta 1 del Traffic Split")
-    logger.info(f"Configuración de BD: {DB_CONFIG['host']}:{DB_CONFIG['port']}")
-    
-    # Verificar conexión inicial
-    try:
-        conn = get_db_connection()
-        if conn:
-            conn.close()
-            logger.info("Conexión inicial a BD exitosa")
-        else:
-            logger.warning("No se pudo conectar a la BD al inicio")
-    except Exception as e:
-        logger.error(f"Error en conexión inicial: {e}")
-    
+    print("Iniciando API Python...")
+    initialize_database()
+    print(f"✓ Base de datos: {DB_CONFIG['host']}:{DB_CONFIG['port']}")
+    print("✓ Esperando datos de Locust via Ingress...")
     app.run(host='0.0.0.0', port=5000, debug=False)

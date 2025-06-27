@@ -30,12 +30,19 @@ cd "${PROJECT_ROOT}" || {
     exit 1
 }
 
-# Definir imágenes de la Fase 2 (diferentes a Fase 1)
+# Definir SOLO las imágenes de APIs para Kubernetes
 api_nodejs_image="bismarckr/api-nodejs-fase2:latest"
 api_python_image="bismarckr/api-python-fase2:latest"
 websocket_api_image="bismarckr/websocket-api-fase2:latest"
-agente_image="bismarckr/agente-fase2:latest"
-frontend_image="bismarckr/frontend-fase2:latest"
+
+echo -e "${BLUE}=== IMÁGENES OBJETIVO PARA KUBERNETES ===${NC}"
+echo -e "${YELLOW}Solo se construirán las APIs necesarias:${NC}"
+echo -e "${BLUE}  • API Node.js (Express/Backend)${NC}"
+echo -e "${BLUE}  • API Python (Flask/FastAPI)${NC}"
+echo -e "${BLUE}  • WebSocket API (Tiempo real)${NC}"
+echo -e "${YELLOW}  ✗ Agente (no necesario para K8s)${NC}"
+echo -e "${YELLOW}  ✗ Frontend (se despliega por separado)${NC}"
+echo
 
 # Función para verificar si una imagen existe en DockerHub
 check_dockerhub_image() {
@@ -43,22 +50,20 @@ check_dockerhub_image() {
     echo -e "${YELLOW}Verificando ${image_name} en DockerHub...${NC}"
     
     if docker manifest inspect ${image_name} &>/dev/null; then
-        echo -e "${GREEN}  Imagen encontrada en DockerHub${NC}"
+        echo -e "${GREEN}  ✓ Imagen encontrada en DockerHub${NC}"
         return 0
     else
-        echo -e "${RED}  Imagen no encontrada en DockerHub${NC}"
+        echo -e "${RED}  ✗ Imagen no encontrada en DockerHub${NC}"
         return 1
     fi
 }
 
-# Verificar disponibilidad en DockerHub
-echo -e "${BLUE}=== VERIFICANDO IMÁGENES EN DOCKERHUB ===${NC}"
+# Verificar disponibilidad en DockerHub SOLO para APIs
+echo -e "${BLUE}=== VERIFICANDO APIS EN DOCKERHUB ===${NC}"
 
 api_nodejs_exists=false
 api_python_exists=false
 websocket_exists=false
-agente_exists=false
-frontend_exists=false
 
 if check_dockerhub_image "$api_nodejs_image"; then
     api_nodejs_exists=true
@@ -72,45 +77,44 @@ if check_dockerhub_image "$websocket_api_image"; then
     websocket_exists=true
 fi
 
-if check_dockerhub_image "$agente_image"; then
-    agente_exists=true
-fi
-
-if check_dockerhub_image "$frontend_image"; then
-    frontend_exists=true
-fi
-
 # Mostrar resultados y preguntar al usuario
 echo
-echo -e "${BLUE}=== ESTADO DE IMÁGENES ===${NC}"
+echo -e "${BLUE}=== ESTADO DE APIS EN DOCKERHUB ===${NC}"
 echo -e "API Node.js:   $($api_nodejs_exists && echo -e "${GREEN}✓ Disponible${NC}" || echo -e "${RED}✗ No disponible${NC}")"
 echo -e "API Python:    $($api_python_exists && echo -e "${GREEN}✓ Disponible${NC}" || echo -e "${RED}✗ No disponible${NC}")" 
 echo -e "WebSocket API: $($websocket_exists && echo -e "${GREEN}✓ Disponible${NC}" || echo -e "${RED}✗ No disponible${NC}")"
-echo -e "Agente Go:     $($agente_exists && echo -e "${GREEN}✓ Disponible${NC}" || echo -e "${RED}✗ No disponible${NC}")"
-echo -e "Frontend:      $($frontend_exists && echo -e "${GREEN}✓ Disponible${NC}" || echo -e "${RED}✗ No disponible${NC}")"
 echo
 
 # Decidir estrategia según disponibilidad
-if $api_nodejs_exists && $api_python_exists && $websocket_exists && $agente_exists && $frontend_exists; then
-    echo -e "${GREEN}Todas las imágenes están disponibles en DockerHub${NC}"
+if $api_nodejs_exists && $api_python_exists && $websocket_exists; then
+    echo -e "${GREEN}✓ Todas las APIs están disponibles en DockerHub${NC}"
     echo
-    echo -e "${YELLOW}Selecciona una opción:${NC}"
-    echo -e "1) Usar imágenes de DockerHub (más rápido)"
-    echo -e "2) Construir imágenes localmente (permite modificaciones)"
+    echo -e "${YELLOW}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${YELLOW}║                    OPCIONES DISPONIBLES                   ║${NC}"
+    echo -e "${YELLOW}╚════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${GREEN}1) Usar imágenes de DockerHub ${BLUE}(más rápido)${NC}"
+    echo -e "${BLUE}   → Descarga rápida desde DockerHub${NC}"
+    echo -e "${BLUE}   → Imágenes pre-compiladas y probadas${NC}"
+    echo -e "${BLUE}   → No requiere compilación local${NC}"
     echo
-    read -p "Opción [1-2]: " choice
+    echo -e "${GREEN}2) Construir imágenes localmente ${BLUE}(más control)${NC}"
+    echo -e "${BLUE}   → Permite modificaciones al código${NC}"
+    echo -e "${BLUE}   → Optimización para tu sistema${NC}"
+    echo -e "${BLUE}   → Control total del proceso${NC}"
+    echo
+    read -p "$(echo -e ${YELLOW}Selecciona una opción [1-2]: ${NC})" choice
     
     case $choice in
         1)
             use_dockerhub=true
-            echo -e "${GREEN}Se usarán las imágenes de DockerHub${NC}"
+            echo -e "${GREEN}✓ Se usarán las imágenes de DockerHub${NC}"
             ;;
         2)
             use_dockerhub=false
-            echo -e "${YELLOW}Se construirán las imágenes localmente${NC}"
+            echo -e "${YELLOW}⚠ Se construirán las imágenes localmente${NC}"
             ;;
         *)
-            echo -e "${RED}Opción inválida. Se construirán localmente${NC}"
+            echo -e "${RED}Opción inválida. Usando construcción local como predeterminado${NC}"
             use_dockerhub=false
             ;;
     esac
@@ -119,41 +123,46 @@ else
     $api_nodejs_exists && ((available_count++))
     $api_python_exists && ((available_count++))
     $websocket_exists && ((available_count++))
-    $agente_exists && ((available_count++))
-    $frontend_exists && ((available_count++))
     
     if [ $available_count -gt 0 ]; then
-        echo -e "${YELLOW}$available_count de 5 imágenes están disponibles en DockerHub${NC}"
+        echo -e "${YELLOW}⚠ $available_count de 3 APIs están disponibles en DockerHub${NC}"
         echo
-        echo -e "${YELLOW}Selecciona una opción:${NC}"
-        echo -e "1) Usar DockerHub donde sea posible, construir el resto"
-        echo -e "2) Construir todas las imágenes localmente"
+        echo -e "${YELLOW}╔════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${YELLOW}║                   ESTRATEGIA MIXTA                        ║${NC}"
+        echo -e "${YELLOW}╚════════════════════════════════════════════════════════════╝${NC}"
+        echo -e "${GREEN}1) Estrategia híbrida ${BLUE}(recomendado)${NC}"
+        echo -e "${BLUE}   → Usar DockerHub donde sea posible${NC}"
+        echo -e "${BLUE}   → Construir localmente las faltantes${NC}"
         echo
-        read -p "Opción [1-2]: " choice
+        echo -e "${GREEN}2) Construir todas localmente ${BLUE}(consistencia)${NC}"
+        echo -e "${BLUE}   → Todas las imágenes construidas igual${NC}"
+        echo -e "${BLUE}   → Mayor tiempo de construcción${NC}"
+        echo
+        read -p "$(echo -e ${YELLOW}Selecciona una opción [1-2]: ${NC})" choice
         
         case $choice in
             1)
                 use_dockerhub=true
-                echo -e "${GREEN}Se usarán imágenes de DockerHub donde sea posible${NC}"
+                echo -e "${GREEN}✓ Estrategia híbrida: DockerHub + construcción local${NC}"
                 ;;
             2)
                 use_dockerhub=false
-                echo -e "${YELLOW}Se construirán todas las imágenes localmente${NC}"
+                echo -e "${YELLOW}⚠ Se construirán todas las APIs localmente${NC}"
                 ;;
             *)
-                echo -e "${RED}Opción inválida. Se construirán localmente${NC}"
+                echo -e "${RED}Opción inválida. Usando construcción local${NC}"
                 use_dockerhub=false
                 ;;
         esac
     else
-        echo -e "${YELLOW}No hay imágenes disponibles en DockerHub${NC}"
-        echo -e "${YELLOW}Se construirán todas las imágenes localmente${NC}"
+        echo -e "${YELLOW}⚠ No hay APIs disponibles en DockerHub${NC}"
+        echo -e "${YELLOW}Se construirán todas las APIs localmente${NC}"
         use_dockerhub=false
     fi
 fi
 
 echo
-echo -e "${BLUE}=== PROCESANDO IMÁGENES ===${NC}"
+echo -e "${BLUE}=== PROCESANDO IMÁGENES DE APIS ===${NC}"
 
 # Función para construir o descargar imagen
 process_image() {
@@ -162,73 +171,139 @@ process_image() {
     local IMAGE_NAME="$3"
     local IMAGE_EXISTS="$4"
     
+    echo -e "${YELLOW}📦 Procesando ${SERVICE_NAME}...${NC}"
+    
     if $use_dockerhub && $IMAGE_EXISTS; then
-        echo -e "${YELLOW}Descargando ${SERVICE_NAME} desde DockerHub...${NC}"
+        echo -e "${YELLOW}  → Descargando desde DockerHub...${NC}"
         docker pull "${IMAGE_NAME}"
         if [ $? -eq 0 ]; then
-            echo -e "${GREEN}   ${SERVICE_NAME} descargada exitosamente${NC}"
+            echo -e "${GREEN}  ✓ ${SERVICE_NAME} descargada exitosamente${NC}"
             return 0
         else
-            echo -e "${RED}   Error descargando ${SERVICE_NAME}, construyendo localmente...${NC}"
+            echo -e "${RED}  ✗ Error descargando, construyendo localmente...${NC}"
         fi
     fi
     
     # Construir localmente
-    echo -e "${YELLOW}Construyendo ${SERVICE_NAME} localmente...${NC}"
+    echo -e "${YELLOW}  → Construyendo localmente...${NC}"
     
     if [ -d "${SERVICE_PATH}" ] && [ -f "${SERVICE_PATH}/Dockerfile" ]; then
         cd "${SERVICE_PATH}" || {
-            echo -e "${RED}Error: No se pudo acceder a ${SERVICE_PATH}${NC}"
+            echo -e "${RED}  ✗ Error: No se pudo acceder a ${SERVICE_PATH}${NC}"
             return 1
         }
         
-        echo -e "${YELLOW}  → Construyendo desde $(pwd)${NC}"
+        echo -e "${BLUE}    Ubicación: $(pwd)${NC}"
+        echo -e "${BLUE}    Comando: docker build -t ${IMAGE_NAME} .${NC}"
+        
         docker build -t "${IMAGE_NAME}" .
         
         if [ $? -eq 0 ]; then
-            echo -e "${GREEN}   ${SERVICE_NAME} construida exitosamente${NC}"
+            echo -e "${GREEN}  ✓ ${SERVICE_NAME} construida exitosamente${NC}"
         else
-            echo -e "${RED}   Error construyendo ${SERVICE_NAME}${NC}"
+            echo -e "${RED}  ✗ Error construyendo ${SERVICE_NAME}${NC}"
+            echo -e "${YELLOW}    Verificando Dockerfile y dependencias...${NC}"
+            if [ -f "Dockerfile" ]; then
+                echo -e "${BLUE}    Dockerfile encontrado${NC}"
+            else
+                echo -e "${RED}    Dockerfile NO encontrado${NC}"
+            fi
             return 1
         fi
         
         cd "${PROJECT_ROOT}"
         return 0
     else
-        echo -e "${RED}Error: ${SERVICE_PATH}/Dockerfile no encontrado${NC}"
+        echo -e "${RED}  ✗ Error: ${SERVICE_PATH}/Dockerfile no encontrado${NC}"
+        echo -e "${YELLOW}    Verificando estructura:${NC}"
+        if [ -d "${SERVICE_PATH}" ]; then
+            echo -e "${BLUE}    Directorio existe: $(ls -la ${SERVICE_PATH} | head -5)${NC}"
+        else
+            echo -e "${RED}    Directorio NO existe: ${SERVICE_PATH}${NC}"
+        fi
         return 1
     fi
 }
 
-# Procesar todas las imágenes
+# Procesar SOLO las APIs necesarias para Kubernetes
 echo
 
-# 1. API Node.js (Ruta 2 del Traffic Split)
-process_image "API Node.js" "Backend/API" "$api_nodejs_image" "$api_nodejs_exists"
+# 1. API Node.js - Ruta principal del backend
+if process_image "API Node.js" "Backend/API-NodeJS" "$api_nodejs_image" "$api_nodejs_exists"; then
+    echo -e "${GREEN}     API Node.js lista para Kubernetes${NC}"
+else
+    echo -e "${RED}     Error procesando API Node.js${NC}"
+    exit 1
+fi
+echo
 
-# 2. API Python (Ruta 1 del Traffic Split) 
-process_image "API Python" "Backend/API-Python" "$api_python_image" "$api_python_exists"
+# 2. API Python - API alternativa/específica 
+if process_image "API Python" "Backend/API-Python" "$api_python_image" "$api_python_exists"; then
+    echo -e "${GREEN}     API Python lista para Kubernetes${NC}"
+else
+    echo -e "${RED}     Error procesando API Python${NC}"
+    exit 1
+fi
+echo
 
-# 3. WebSocket API (3ra API para tiempo real)
-process_image "WebSocket API" "Backend/WebSocket-API" "$websocket_api_image" "$websocket_exists"
+# 3. WebSocket API - API de tiempo real
+if process_image "WebSocket API" "Backend/WebSocket-API" "$websocket_api_image" "$websocket_exists"; then
+    echo -e "${GREEN}     WebSocket API lista para Kubernetes${NC}"
+else
+    echo -e "${RED}     Error procesando WebSocket API${NC}"
+    exit 1
+fi
+echo
 
-# 4. Agente Go (Recolector de métricas)
-process_image "Agente Go" "Backend/Agente" "$agente_image" "$agente_exists"
+echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║                    PROCESO COMPLETADO                     ║${NC}"
+echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
 
-# 5. Frontend React
-process_image "Frontend React" "Frontend" "$frontend_image" "$frontend_exists"
+# Verificar imágenes finales disponibles en Minikube
+echo -e "${YELLOW} Imágenes disponibles en Minikube:${NC}"
+
+api_nodejs_info=$(docker images | grep "${api_nodejs_image%:*}" | head -1)
+api_python_info=$(docker images | grep "${api_python_image%:*}" | head -1)
+websocket_info=$(docker images | grep "${websocket_api_image%:*}" | head -1)
+
+if [ -n "$api_nodejs_info" ]; then
+    echo -e "${GREEN}  ✓ API Node.js:${NC}   $api_nodejs_info"
+else
+    echo -e "${RED}  ✗ API Node.js:   No disponible${NC}"
+fi
+
+if [ -n "$api_python_info" ]; then
+    echo -e "${GREEN}  ✓ API Python:${NC}    $api_python_info"
+else
+    echo -e "${RED}  ✗ API Python:    No disponible${NC}"
+fi
+
+if [ -n "$websocket_info" ]; then
+    echo -e "${GREEN}  ✓ WebSocket API:${NC} $websocket_info"
+else
+    echo -e "${RED}  ✗ WebSocket API: No disponible${NC}"
+fi
 
 echo
-echo -e "${GREEN}=== PROCESO COMPLETADO ===${NC}"
+total_images=$(docker images | grep -E "(api-nodejs-fase2|api-python-fase2|websocket-api-fase2)" | wc -l)
+echo -e "${YELLOW} Total de APIs listas: ${total_images}/3${NC}"
 
-# Verificar imágenes finales
-echo -e "${YELLOW}Imágenes disponibles en Minikube:${NC}"
-echo -e "${BLUE}API Node.js:${NC}   $(docker images | grep "${api_nodejs_image%:*}" | head -1)"
-echo -e "${BLUE}API Python:${NC}    $(docker images | grep "${api_python_image%:*}" | head -1)"
-echo -e "${BLUE}WebSocket API:${NC} $(docker images | grep "${websocket_api_image%:*}" | head -1)"
-echo -e "${BLUE}Agente Go:${NC}     $(docker images | grep "${agente_image%:*}" | head -1)"
-echo -e "${BLUE}Frontend:${NC}      $(docker images | grep "${frontend_image%:*}" | head -1)"
+if [ $total_images -eq 3 ]; then
+    echo -e "${GREEN} ¡Todas las APIs están listas para desplegar en Kubernetes!${NC}"
+    echo
+    echo -e "${BLUE} Próximos pasos:${NC}"
+    echo -e "${YELLOW}  1. Las imágenes están cargadas en Minikube${NC}"
+    echo -e "${YELLOW}  2. Listas para usar en manifests de Kubernetes${NC}"
+    echo -e "${YELLOW}  3. El despliegue puede continuar${NC}"
+else
+    echo -e "${RED} Error: No todas las APIs están disponibles${NC}"
+    echo -e "${YELLOW}⚠ El despliegue puede fallar${NC}"
+    exit 1
+fi
 
 echo
-total_images=$(docker images | grep -E "(api-nodejs-fase2|api-python-fase2|websocket-api-fase2|agente-fase2|frontend-fase2)" | wc -l)
-echo -e "${YELLOW}Total de imágenes de Fase 2: ${total_images}/5${NC}"
+echo -e "${BLUE} Comandos útiles:${NC}"
+echo -e "${YELLOW}  docker images | grep fase2${NC}               # Ver todas las imágenes"
+echo -e "${YELLOW}  minikube image ls | grep fase2${NC}           # Ver imágenes en Minikube"
+echo -e "${YELLOW}  kubectl create deployment test --image=${api_nodejs_image}${NC}  # Probar deployment"
+echo
