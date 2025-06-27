@@ -96,7 +96,6 @@ EOF
 <html lang="es">
   <head>
     <meta charset="utf-8" />
-    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#000000" />
     <meta name="description" content="Sistema de Monitoreo en Tiempo Real - Fase 2" />
@@ -567,7 +566,7 @@ EOF
 }
 EOF
     
-    # 4. Crear Dockerfile para build
+    # 4. Crear Dockerfile para build final (Multi-stage)
     echo -e "${YELLOW}  → Creando Dockerfile...${NC}"
     cat > Dockerfile << 'EOF'
 # Etapa 1: Construir la aplicación React
@@ -575,11 +574,11 @@ FROM node:18-alpine AS build
 
 WORKDIR /app
 
-# Copiar archivos de dependencias primero (mejor cache de Docker)
-COPY package*.json ./
+# Copiar archivos de dependencias primero
+COPY package.json ./
 
-# Instalar dependencias
-RUN npm ci --only=production
+# Instalar dependencias usando npm install (no npm ci)
+RUN npm install --silent
 
 # Copiar el resto del código fuente
 COPY . .
@@ -753,24 +752,24 @@ EOF
     cd ..
 }
 
-# Hacer build usando Docker (evita problemas de dependencias locales)
+# Hacer build usando Docker (CORREGIDO - sin npm ci)
 build_with_docker() {
     echo -e "${YELLOW}Construyendo React app usando Docker...${NC}"
     
     cd Frontend
     
-    # Crear Dockerfile temporal solo para build
+    # Crear Dockerfile temporal para build (CORREGIDO)
     echo -e "${YELLOW}  → Creando Dockerfile temporal para build...${NC}"
     cat > Dockerfile.build << 'EOF'
 FROM node:18-alpine
 
 WORKDIR /app
 
-# Copiar package.json y package-lock.json
-COPY package*.json ./
+# Copiar package.json
+COPY package.json ./
 
-# Instalar dependencias
-RUN npm ci
+# Instalar dependencias usando npm install (no npm ci porque no hay package-lock.json)
+RUN npm install --silent
 
 # Copiar código fuente
 COPY . .
@@ -792,9 +791,12 @@ EOF
         exit 1
     fi
     
+    # Crear directorio build si no existe
+    mkdir -p build
+    
     # Ejecutar build y extraer archivos
     echo -e "${YELLOW}  → Ejecutando build dentro del contenedor...${NC}"
-    docker run --rm -v "$(pwd)/build:/output" react-builder-temp sh -c "cp -r build/* /output/"
+    docker run --rm -v "$(pwd)/build:/output" react-builder-temp sh -c "cp -r build/* /output/ 2>/dev/null || true"
     
     if [ $? -eq 0 ] && [ -d "build" ] && [ -f "build/index.html" ]; then
         BUILD_SIZE=$(du -sh build/ | cut -f1)
@@ -807,8 +809,21 @@ EOF
         echo -e "${GREEN}✓ Archivos CSS: $CSS_FILES${NC}"
     else
         echo -e "${RED}✗ Build falló o archivos no generados${NC}"
-        rm -f Dockerfile.build
-        exit 1
+        echo -e "${YELLOW}Intentando método alternativo...${NC}"
+        
+        # Método alternativo: copiar desde el contenedor corriendo
+        CONTAINER_ID=$(docker run -d react-builder-temp sleep 60)
+        docker cp $CONTAINER_ID:/app/build/. ./build/ 2>/dev/null || true
+        docker stop $CONTAINER_ID >/dev/null 2>&1
+        docker rm $CONTAINER_ID >/dev/null 2>&1
+        
+        if [ -f "build/index.html" ]; then
+            echo -e "${GREEN}✓ Build extraído exitosamente (método alternativo)${NC}"
+        else
+            echo -e "${RED}✗ Build completamente falló${NC}"
+            rm -f Dockerfile.build
+            exit 1
+        fi
     fi
     
     # Limpiar imagen temporal
@@ -818,23 +833,17 @@ EOF
     cd ..
 }
 
-# Construir imagen Docker del Frontend
+# Construir imagen Docker del Frontend (usando multi-stage build directamente)
 build_frontend_image() {
     echo -e "${YELLOW}Construyendo imagen Docker del Frontend...${NC}"
     
     cd Frontend
     
-    # Verificar que el build existe
-    if [ ! -d "build" ]; then
-        echo -e "${YELLOW}  → Build no encontrado, construyendo...${NC}"
-        build_with_docker
-    fi
-    
     # Limpiar imagen anterior
     docker rmi bismarckr/frontend-fase2:latest 2>/dev/null || true
     
-    # Construir imagen final
-    echo -e "${YELLOW}  → Construyendo imagen final...${NC}"
+    # Construir imagen final usando multi-stage build
+    echo -e "${YELLOW}  → Construyendo imagen final con multi-stage build...${NC}"
     docker build -t bismarckr/frontend-fase2:latest .
     
     if [ $? -eq 0 ]; then
@@ -915,7 +924,7 @@ main() {
             echo -e "${YELLOW}=== INSTALACIÓN COMPLETA DEL FRONTEND ===${NC}"
             check_docker
             create_react_structure
-            build_with_docker
+            # Usar directamente multi-stage build en lugar de build separado
             build_frontend_image
             run_frontend_container
             show_status
@@ -955,7 +964,6 @@ main() {
             docker stop frontend-local 2>/dev/null || true
             docker rm frontend-local 2>/dev/null || true
             docker rmi bismarckr/frontend-fase2:latest 2>/dev/null || true
-            build_with_docker
             build_frontend_image
             run_frontend_container
             show_status
