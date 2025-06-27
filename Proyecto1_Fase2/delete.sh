@@ -21,7 +21,8 @@ echo -e "${BLUE}   • Toda la base de datos MySQL${NC}"
 echo -e "${BLUE}   • Todos los procesos relacionados${NC}"
 
 echo
-read -p "$(echo -e ${RED}¿ESTÁS SEGURO? Esto eliminará TODO (s/N): ${NC})" confirm
+echo -n "¿ESTÁS SEGURO? Esto eliminará TODO (s/N): "
+read confirm
 
 if [[ ! $confirm =~ ^[SsYy]$ ]]; then
     echo -e "${BLUE}Operación cancelada${NC}"
@@ -181,7 +182,7 @@ echo -e "${GREEN}║                    LIMPIEZA COMPLETA                      �
 echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
 
 echo
-echo -e "${GREEN}🎉 ¡SISTEMA COMPLETAMENTE LIMPIO!${NC}"
+echo -e "${GREEN}✓ ¡SISTEMA COMPLETAMENTE LIMPIO!${NC}"
 echo
 echo -e "${YELLOW}📋 Lo que se eliminó:${NC}"
 echo -e "${GREEN}   ✓ Todos los contenedores Docker${NC}"
