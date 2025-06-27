@@ -30,19 +30,52 @@ cd "${PROJECT_ROOT}" || {
     exit 1
 }
 
-# Definir SOLO las imágenes de APIs para Kubernetes
+# Definir SOLO las imágenes de APIs para Kubernetes con RUTAS CORRECTAS
 api_nodejs_image="bismarckr/api-nodejs-fase2:latest"
 api_python_image="bismarckr/api-python-fase2:latest"
 websocket_api_image="bismarckr/websocket-api-fase2:latest"
 
+# RUTAS CORREGIDAS según tu estructura real
+api_nodejs_path="Backend/API"
+api_python_path="Backend/API-Python"
+websocket_path="Backend/WebSocket-API"
+
 echo -e "${BLUE}=== IMÁGENES OBJETIVO PARA KUBERNETES ===${NC}"
 echo -e "${YELLOW}Solo se construirán las APIs necesarias:${NC}"
-echo -e "${BLUE}  • API Node.js (Express/Backend)${NC}"
-echo -e "${BLUE}  • API Python (Flask/FastAPI)${NC}"
-echo -e "${BLUE}  • WebSocket API (Tiempo real)${NC}"
+echo -e "${BLUE}  • API Node.js (Express/Backend) → ${api_nodejs_path}${NC}"
+echo -e "${BLUE}  • API Python (Flask/FastAPI) → ${api_python_path}${NC}"
+echo -e "${BLUE}  • WebSocket API (Tiempo real) → ${websocket_path}${NC}"
 echo -e "${YELLOW}  ✗ Agente (no necesario para K8s)${NC}"
 echo -e "${YELLOW}  ✗ Frontend (se despliega por separado)${NC}"
 echo
+
+# Verificar que las rutas existen antes de continuar
+echo -e "${BLUE}=== VERIFICANDO ESTRUCTURA LOCAL ===${NC}"
+all_paths_exist=true
+
+for path_name in "API Node.js:${api_nodejs_path}" "API Python:${api_python_path}" "WebSocket API:${websocket_path}"; do
+    IFS=':' read -r name path <<< "$path_name"
+    full_path="${PROJECT_ROOT}/${path}"
+    
+    if [ -d "$full_path" ]; then
+        echo -e "${GREEN}✓ ${name}: ${path}${NC}"
+        if [ -f "$full_path/Dockerfile" ]; then
+            echo -e "${GREEN}  ✓ Dockerfile encontrado${NC}"
+        else
+            echo -e "${RED}  X Dockerfile NO encontrado en ${full_path}${NC}"
+            all_paths_exist=false
+        fi
+    else
+        echo -e "${RED}X ${name}: ${path} NO EXISTE${NC}"
+        all_paths_exist=false
+    fi
+done
+
+if [ "$all_paths_exist" = false ]; then
+    echo -e "${RED}Error: No se pueden construir las imágenes debido a rutas faltantes${NC}"
+    echo -e "${YELLOW}Verifica que los directorios y Dockerfiles existan${NC}"
+    exit 1
+fi
 
 # Función para verificar si una imagen existe en DockerHub
 check_dockerhub_image() {
@@ -225,11 +258,11 @@ process_image() {
     fi
 }
 
-# Procesar SOLO las APIs necesarias para Kubernetes
+# Procesar SOLO las APIs necesarias para Kubernetes CON RUTAS CORREGIDAS
 echo
 
-# 1. API Node.js - Ruta principal del backend
-if process_image "API Node.js" "Backend/API-NodeJS" "$api_nodejs_image" "$api_nodejs_exists"; then
+# 1. API Node.js - RUTA CORREGIDA
+if process_image "API Node.js" "${api_nodejs_path}" "$api_nodejs_image" "$api_nodejs_exists"; then
     echo -e "${GREEN}     API Node.js lista para Kubernetes${NC}"
 else
     echo -e "${RED}     Error procesando API Node.js${NC}"
@@ -237,8 +270,8 @@ else
 fi
 echo
 
-# 2. API Python - API alternativa/específica 
-if process_image "API Python" "Backend/API-Python" "$api_python_image" "$api_python_exists"; then
+# 2. API Python - RUTA CORREGIDA
+if process_image "API Python" "${api_python_path}" "$api_python_image" "$api_python_exists"; then
     echo -e "${GREEN}     API Python lista para Kubernetes${NC}"
 else
     echo -e "${RED}     Error procesando API Python${NC}"
@@ -246,8 +279,8 @@ else
 fi
 echo
 
-# 3. WebSocket API - API de tiempo real
-if process_image "WebSocket API" "Backend/WebSocket-API" "$websocket_api_image" "$websocket_exists"; then
+# 3. WebSocket API - RUTA CORREGIDA
+if process_image "WebSocket API" "${websocket_path}" "$websocket_api_image" "$websocket_exists"; then
     echo -e "${GREEN}     WebSocket API lista para Kubernetes${NC}"
 else
     echo -e "${RED}     Error procesando WebSocket API${NC}"
