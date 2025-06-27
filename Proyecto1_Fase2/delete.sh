@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Script para eliminar todos los servicios utilizados
+# Script para eliminar todos los servicios de Fase 2
 # Autor: Bismarck Romero - 201708880
-# Fecha: Junio 2025 - SO1 Fase 2
+# Fecha: Junio 2025
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -10,351 +10,331 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-clear
-echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║                                                            ║${NC}"
-echo -e "${BLUE}║ ${RED}LIMPIEZA COMPLETA DEL SISTEMA - SO1 FASE 2${BLUE}               ║${NC}"
-echo -e "${BLUE}║              ${YELLOW}Bismarck Romero - 201708880${BLUE}                  ║${NC}"
-echo -e "${BLUE}║                                                            ║${NC}"
-echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
-echo
+echo -e "${YELLOW}╔════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${YELLOW}║               LIMPIEZA COMPLETA - FASE 2                  ║${NC}"
+echo -e "${YELLOW}╚════════════════════════════════════════════════════════════╝${NC}"
 
-# Función para verificar qué componentes están activos
-check_active_components() {
-    echo -e "${YELLOW}=== DETECTANDO COMPONENTES ACTIVOS ===${NC}"
+# Función para verificar si un comando existe
+command_exists() {
+    command -v "$1" &> /dev/null
+}
+
+# Función para limpiar MySQL de manera más eficiente
+cleanup_mysql() {
+    echo -e "${YELLOW}6. Limpiando base de datos MySQL...${NC}"
     
-    COMPONENTS_FOUND=()
-    
-    # 1. Verificar Kubernetes/Minikube
-    if command -v kubectl &> /dev/null && kubectl get namespace so1-fase2 &> /dev/null; then
-        COMPONENTS_FOUND+=("Kubernetes: Namespace so1-fase2 con pods")
+    if ! command_exists mysql; then
+        echo -e "${BLUE}  → MySQL no está instalado, saltando...${NC}"
+        return
     fi
     
-    if command -v minikube &> /dev/null && minikube status &> /dev/null; then
-        COMPONENTS_FOUND+=("Minikube: Cluster ejecutándose")
+    if ! sudo systemctl is-active --quiet mysql; then
+        echo -e "${YELLOW}  → MySQL no está ejecutándose${NC}"
+        read -p "$(echo -e ${BLUE}¿Quieres intentar iniciarlo para limpiar? (s/N): ${NC})" start_mysql
+        
+        if [[ $start_mysql =~ ^[SsYy]$ ]]; then
+            sudo systemctl start mysql
+            sleep 3
+        else
+            echo -e "${BLUE}  → Saltando limpieza de MySQL${NC}"
+            return
+        fi
     fi
     
-    # 2. Verificar contenedores Docker
-    if command -v docker &> /dev/null; then
-        if docker ps -a | grep -q "frontend-local"; then
-            COMPONENTS_FOUND+=("Docker: Contenedor frontend-local")
+    read -p "$(echo -e ${YELLOW}¿Eliminar la base de datos 'monitoring' de MySQL? (s/N): ${NC})" delete_db
+    
+    if [[ $delete_db =~ ^[SsYy]$ ]]; then
+        echo -e "${YELLOW}  → Intentando métodos de autenticación...${NC}"
+        
+        # Método 1: Sin contraseña (más común en instalaciones locales)
+        echo -e "${BLUE}    Método 1: Acceso directo como root...${NC}"
+        if mysql -u root -e "SELECT 1;" &>/dev/null; then
+            echo -e "${GREEN}    ✓ Acceso directo exitoso${NC}"
+            mysql -u root <<EOF
+DROP DATABASE IF EXISTS monitoring;
+DROP USER IF EXISTS 'monitor'@'localhost';
+DROP USER IF EXISTS 'monitor'@'%';
+FLUSH PRIVILEGES;
+SELECT 'Base de datos y usuario eliminados correctamente' AS status;
+EOF
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}  ✓ Base de datos MySQL limpiada (método directo)${NC}"
+                return
+            fi
         fi
         
-        if docker ps -a | grep -q "agente-vm-monitor"; then
-            COMPONENTS_FOUND+=("Docker: Contenedor agente-vm-monitor")
+        # Método 2: Con sudo
+        echo -e "${BLUE}    Método 2: Acceso con sudo...${NC}"
+        if sudo mysql -u root -e "SELECT 1;" &>/dev/null; then
+            echo -e "${GREEN}    ✓ Acceso con sudo exitoso${NC}"
+            sudo mysql -u root <<EOF
+DROP DATABASE IF EXISTS monitoring;
+DROP USER IF EXISTS 'monitor'@'localhost';
+DROP USER IF EXISTS 'monitor'@'%';
+FLUSH PRIVILEGES;
+SELECT 'Base de datos y usuario eliminados correctamente' AS status;
+EOF
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}  ✓ Base de datos MySQL limpiada (método sudo)${NC}"
+                return
+            fi
         fi
         
-        if docker ps -a | grep -q "agente-local"; then
-            COMPONENTS_FOUND+=("Docker: Contenedor agente-local")
+        # Método 3: Como usuario monitor (si existe)
+        echo -e "${BLUE}    Método 3: Usando usuario monitor...${NC}"
+        if mysql -u monitor -pmonitor123 -e "SELECT 1;" &>/dev/null; then
+            echo -e "${GREEN}    ✓ Usuario monitor accesible${NC}"
+            mysql -u monitor -pmonitor123 -e "DROP DATABASE IF EXISTS monitoring;" &>/dev/null
+            
+            # Para eliminar el usuario necesitamos root
+            if mysql -u root -e "DROP USER IF EXISTS 'monitor'@'localhost'; DROP USER IF EXISTS 'monitor'@'%'; FLUSH PRIVILEGES;" &>/dev/null; then
+                echo -e "${GREEN}  ✓ Base de datos eliminada y usuario limpiado${NC}"
+                return
+            elif sudo mysql -u root -e "DROP USER IF EXISTS 'monitor'@'localhost'; DROP USER IF EXISTS 'monitor'@'%'; FLUSH PRIVILEGES;" &>/dev/null; then
+                echo -e "${GREEN}  ✓ Base de datos eliminada y usuario limpiado (con sudo)${NC}"
+                return
+            else
+                echo -e "${YELLOW}  ⚠ Base de datos eliminada, pero no se pudo limpiar usuario${NC}"
+                return
+            fi
         fi
         
-        # Verificar imágenes del proyecto
-        if docker images | grep -q "bismarckr.*fase2"; then
-            COMPONENTS_FOUND+=("Docker: Imágenes del proyecto bismarckr/*-fase2")
+        # Método 4: Solicitar contraseña manualmente
+        echo -e "${BLUE}    Método 4: Contraseña manual...${NC}"
+        echo -e "${YELLOW}    Ingresa la contraseña de root de MySQL:${NC}"
+        read -s mysql_root_password
+        
+        if mysql -u root -p"$mysql_root_password" -e "SELECT 1;" &>/dev/null; then
+            echo -e "${GREEN}    ✓ Contraseña correcta${NC}"
+            mysql -u root -p"$mysql_root_password" <<EOF
+DROP DATABASE IF EXISTS monitoring;
+DROP USER IF EXISTS 'monitor'@'localhost';
+DROP USER IF EXISTS 'monitor'@'%';
+FLUSH PRIVILEGES;
+SELECT 'Base de datos y usuario eliminados correctamente' AS status;
+EOF
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}  ✓ Base de datos MySQL limpiada (método contraseña)${NC}"
+                return
+            fi
+        else
+            echo -e "${RED}    ✗ Contraseña incorrecta${NC}"
         fi
-    fi
-    
-    # 3. Verificar MySQL
-    if systemctl is-active --quiet mysql 2>/dev/null; then
-        if mysql -u monitor -pmonitor123 -e "USE monitoring;" &> /dev/null; then
-            COMPONENTS_FOUND+=("MySQL: Base de datos 'monitoring' con usuario 'monitor'")
-        fi
-    fi
-    
-    # 4. Verificar módulos del kernel
-    if lsmod | grep -q "201708880"; then
-        MODULES=$(lsmod | grep "201708880" | awk '{print $1}' | tr '\n' ', ' | sed 's/,$//')
-        COMPONENTS_FOUND+=("Kernel: Módulos cargados ($MODULES)")
-    fi
-    
-    # 5. Verificar procesos del agente nativo
-    if pgrep -f "agente-de-monitor" > /dev/null; then
-        COMPONENTS_FOUND+=("Procesos: Agente nativo ejecutándose")
-    fi
-    
-    # 6. Verificar Locust
-    if pgrep -f "locust" > /dev/null; then
-        COMPONENTS_FOUND+=("Procesos: Locust ejecutándose")
-    fi
-    
-    # 7. Verificar archivos temporales y logs
-    if [ -d "Frontend/build" ]; then
-        COMPONENTS_FOUND+=("Archivos: Build del Frontend React")
-    fi
-    
-    if [ -f "Backend/Agente/agente" ]; then
-        COMPONENTS_FOUND+=("Archivos: Binario del agente compilado")
-    fi
-    
-    if ls Modulos/*.ko &> /dev/null; then
-        COMPONENTS_FOUND+=("Archivos: Módulos del kernel compilados (.ko)")
-    fi
-    
-    if [ -d "Locust/reports" ]; then
-        COMPONENTS_FOUND+=("Archivos: Reportes de Locust")
-    fi
-    
-    # Mostrar componentes encontrados
-    if [ ${#COMPONENTS_FOUND[@]} -eq 0 ]; then
-        echo -e "${GREEN}✓ No se encontraron componentes activos del proyecto${NC}"
-        echo -e "${YELLOW}El sistema ya está limpio.${NC}"
-        exit 0
+        
+        echo -e "${RED}  ✗ No se pudo acceder a MySQL para limpiar${NC}"
+        echo -e "${YELLOW}  → Para limpiar manualmente:${NC}"
+        echo -e "${BLUE}    mysql -u root -p${NC}"
+        echo -e "${BLUE}    DROP DATABASE IF EXISTS monitoring;${NC}"
+        echo -e "${BLUE}    DROP USER IF EXISTS 'monitor'@'localhost';${NC}"
+        echo -e "${BLUE}    DROP USER IF EXISTS 'monitor'@'%';${NC}"
+        echo -e "${BLUE}    FLUSH PRIVILEGES;${NC}"
     else
-        echo -e "${RED}Se encontraron ${#COMPONENTS_FOUND[@]} componentes activos:${NC}"
-        for component in "${COMPONENTS_FOUND[@]}"; do
-            echo -e "${YELLOW}  ✗ $component${NC}"
-        done
+        echo -e "${BLUE}  → Saltando limpieza de base de datos${NC}"
     fi
 }
 
-# Función principal de limpieza
-perform_cleanup() {
-    echo -e "${YELLOW}=== INICIANDO LIMPIEZA COMPLETA ===${NC}"
+# Función para verificar limpieza
+verify_cleanup() {
+    echo -e "${YELLOW}9. Verificando limpieza...${NC}"
     
-    # 1. Detener y eliminar contenedores Docker
-    echo -e "${BLUE}1. Limpiando contenedores Docker...${NC}"
-    if command -v docker &> /dev/null; then
-        # Detener contenedores del proyecto
-        for container in frontend-local agente-vm-monitor agente-local agente-monitor; do
-            if docker ps -a | grep -q "$container"; then
-                echo -e "${YELLOW}  → Deteniendo y eliminando $container...${NC}"
-                docker stop "$container" 2>/dev/null || true
-                docker rm "$container" 2>/dev/null || true
-            fi
-        done
+    # Verificar Docker
+    if command_exists docker; then
+        PROJECT_CONTAINERS=$(docker ps -a --filter "name=fase2" --format "{{.Names}}" 2>/dev/null | wc -l)
+        PROJECT_IMAGES=$(docker images | grep -E "(fase2|bismarckr.*fase2)" | wc -l)
         
-        # Eliminar imágenes del proyecto
-        images=$(docker images | grep "bismarckr.*fase2" | awk '{print $3}')
-        if [ -n "$images" ]; then
-            echo -e "${YELLOW}  → Eliminando imágenes del proyecto...${NC}"
-            docker rmi -f $images 2>/dev/null || true
-        fi
-        
-        # Eliminar imágenes del agente
-        agente_images=$(docker images | grep "agente" | grep "bismarckr\|local" | awk '{print $3}')
-        if [ -n "$agente_images" ]; then
-            echo -e "${YELLOW}  → Eliminando imágenes del agente...${NC}"
-            docker rmi -f $agente_images 2>/dev/null || true
-        fi
-        
-        echo -e "${GREEN}  ✓ Contenedores Docker limpiados${NC}"
-    else
-        echo -e "${YELLOW}  ℹ Docker no encontrado${NC}"
+        echo -e "${BLUE}  → Contenedores del proyecto: $PROJECT_CONTAINERS${NC}"
+        echo -e "${BLUE}  → Imágenes del proyecto: $PROJECT_IMAGES${NC}"
     fi
     
-    # 2. Limpiar Kubernetes
-    echo -e "${BLUE}2. Limpiando Kubernetes...${NC}"
-    if command -v kubectl &> /dev/null; then
-        if kubectl get namespace so1-fase2 &> /dev/null; then
-            echo -e "${YELLOW}  → Eliminando namespace so1-fase2...${NC}"
-            kubectl delete namespace so1-fase2 --timeout=60s 2>/dev/null || true
-        fi
-        echo -e "${GREEN}  ✓ Namespace Kubernetes eliminado${NC}"
-    else
-        echo -e "${YELLOW}  ℹ kubectl no encontrado${NC}"
+    # Verificar Kubernetes
+    if command_exists kubectl; then
+        NAMESPACES=$(kubectl get namespaces | grep -E "(so1-fase2|monitoring)" | wc -l)
+        echo -e "${BLUE}  → Namespaces del proyecto: $NAMESPACES${NC}"
     fi
     
-    # 3. Detener Minikube
-    echo -e "${BLUE}3. Deteniendo Minikube...${NC}"
-    if command -v minikube &> /dev/null; then
-        if minikube status &> /dev/null; then
-            echo -e "${YELLOW}  → Deteniendo Minikube...${NC}"
-            minikube stop
-            echo -e "${GREEN}  ✓ Minikube detenido${NC}"
+    # Verificar Minikube
+    if command_exists minikube; then
+        MINIKUBE_STATUS=$(minikube status 2>/dev/null | grep -E "(Running|Stopped)" | head -1 | awk '{print $2}' || echo "No disponible")
+        echo -e "${BLUE}  → Estado de Minikube: $MINIKUBE_STATUS${NC}"
+    fi
+    
+    # Verificar MySQL
+    if command_exists mysql; then
+        if mysql -u monitor -pmonitor123 -e "USE monitoring; SELECT 1;" &>/dev/null; then
+            echo -e "${RED}  ⚠ Base de datos 'monitoring' aún existe${NC}"
+        elif mysql -u root -e "USE monitoring; SELECT 1;" &>/dev/null; then
+            echo -e "${RED}  ⚠ Base de datos 'monitoring' aún existe${NC}"
+        elif sudo mysql -u root -e "USE monitoring; SELECT 1;" &>/dev/null; then
+            echo -e "${RED}  ⚠ Base de datos 'monitoring' aún existe${NC}"
         else
-            echo -e "${GREEN}  ✓ Minikube ya estaba detenido${NC}"
+            echo -e "${GREEN}  ✓ Base de datos 'monitoring' eliminada${NC}"
         fi
+    fi
+    
+    # Verificar archivos temporales
+    TEMP_FILES=0
+    if [ -d "/tmp" ]; then
+        TEMP_FILES=$(find /tmp -name "*fase2*" -o -name "*monitor*" -o -name "*locust*" 2>/dev/null | wc -l)
+    fi
+    echo -e "${BLUE}  → Archivos temporales del proyecto: $TEMP_FILES${NC}"
+}
+
+# INICIO DE LIMPIEZA
+
+echo -e "${BLUE}Iniciando limpieza completa del proyecto Fase 2...${NC}"
+echo
+
+# 1. Limpiar Docker Compose
+echo -e "${YELLOW}1. Limpiando Docker Compose...${NC}"
+if [ -f "docker-compose.yml" ]; then
+    echo -e "${YELLOW}  → Deteniendo servicios de Docker Compose...${NC}"
+    docker-compose down -v --remove-orphans &>/dev/null
+    echo -e "${GREEN}  ✓ Docker Compose limpiado${NC}"
+else
+    echo -e "${BLUE}  → No hay docker-compose.yml${NC}"
+fi
+
+# 2. Limpiar contenedores Docker
+echo -e "${YELLOW}2. Limpiando contenedores Docker...${NC}"
+if command_exists docker; then
+    # Detener contenedores del proyecto
+    CONTAINERS=$(docker ps -a --filter "name=fase2" --format "{{.ID}}" 2>/dev/null)
+    if [ -n "$CONTAINERS" ]; then
+        echo -e "${YELLOW}  → Deteniendo y eliminando contenedores...${NC}"
+        echo "$CONTAINERS" | xargs docker rm -f &>/dev/null
+        echo -e "${GREEN}  ✓ Contenedores eliminados${NC}"
     else
-        echo -e "${YELLOW}  ℹ Minikube no encontrado${NC}"
+        echo -e "${BLUE}  → No hay contenedores del proyecto${NC}"
     fi
     
-    # 4. Detener procesos nativos
-    echo -e "${BLUE}4. Deteniendo procesos nativos...${NC}"
-    
-    # Detener agente nativo
-    if pgrep -f "agente-de-monitor" > /dev/null; then
-        echo -e "${YELLOW}  → Deteniendo agente nativo...${NC}"
-        pkill -f "agente-de-monitor" 2>/dev/null || true
+    # Eliminar imágenes del proyecto
+    read -p "$(echo -e ${YELLOW}¿Eliminar imágenes Docker del proyecto? (s/N): ${NC})" delete_images
+    if [[ $delete_images =~ ^[SsYy]$ ]]; then
+        IMAGES=$(docker images | grep -E "(fase2|bismarckr.*fase2)" | awk '{print $3}' 2>/dev/null)
+        if [ -n "$IMAGES" ]; then
+            echo -e "${YELLOW}  → Eliminando imágenes...${NC}"
+            echo "$IMAGES" | xargs docker rmi -f &>/dev/null
+            echo -e "${GREEN}  ✓ Imágenes eliminadas${NC}"
+        else
+            echo -e "${BLUE}  → No hay imágenes del proyecto${NC}"
+        fi
     fi
     
-    # Detener Locust
-    if pgrep -f "locust" > /dev/null; then
-        echo -e "${YELLOW}  → Deteniendo Locust...${NC}"
-        pkill -f "locust" 2>/dev/null || true
-    fi
-    
-    echo -e "${GREEN}  ✓ Procesos nativos detenidos${NC}"
-    
-    # 5. Limpiar módulos del kernel
-    echo -e "${BLUE}5. Descargando módulos del kernel...${NC}"
-    modules_removed=0
-    
-    for module in cpu_201708880 ram_201708880 procesos_201708880; do
-        if lsmod | grep -q "$module"; then
-            echo -e "${YELLOW}  → Descargando módulo $module...${NC}"
-            sudo rmmod "$module" 2>/dev/null || true
-            ((modules_removed++))
+    # Limpiar volúmenes
+    echo -e "${YELLOW}  → Limpiando volúmenes...${NC}"
+    docker volume prune -f &>/dev/null
+    echo -e "${GREEN}  ✓ Volúmenes limpiados${NC}"
+else
+    echo -e "${BLUE}  → Docker no está instalado${NC}"
+fi
+
+# 3. Limpiar Kubernetes
+echo -e "${YELLOW}3. Limpiando Kubernetes...${NC}"
+if command_exists kubectl; then
+    # Eliminar namespace del proyecto
+    NAMESPACES=("so1-fase2" "monitoring" "proyecto-fase2")
+    for ns in "${NAMESPACES[@]}"; do
+        if kubectl get namespace "$ns" &>/dev/null; then
+            echo -e "${YELLOW}  → Eliminando namespace $ns...${NC}"
+            kubectl delete namespace "$ns" --grace-period=0 --force &>/dev/null
+            echo -e "${GREEN}  ✓ Namespace $ns eliminado${NC}"
         fi
     done
     
-    if [ $modules_removed -eq 0 ]; then
-        echo -e "${GREEN}  ✓ No había módulos cargados${NC}"
-    else
-        echo -e "${GREEN}  ✓ $modules_removed módulos descargados${NC}"
-    fi
-    
-    # 6. Limpiar base de datos MySQL (opcional)
-    echo -e "${BLUE}6. Limpiando base de datos MySQL...${NC}"
-    read -p "¿Eliminar la base de datos 'monitoring' de MySQL? (s/N): " cleanup_mysql
-    if [[ $cleanup_mysql =~ ^[Ss]$ ]]; then
-        if command -v mysql &> /dev/null; then
-            echo -e "${YELLOW}  → Eliminando base de datos monitoring...${NC}"
-            mysql -u root -p -e "DROP DATABASE IF EXISTS monitoring;" 2>/dev/null || true
-            echo -e "${YELLOW}  → Eliminando usuario monitor...${NC}"
-            mysql -u root -p -e "DROP USER IF EXISTS 'monitor'@'%';" 2>/dev/null || true
-            echo -e "${GREEN}  ✓ Base de datos MySQL limpiada${NC}"
-        else
-            echo -e "${YELLOW}  ℹ MySQL no encontrado${NC}"
-        fi
-    else
-        echo -e "${YELLOW}  ℹ Base de datos MySQL conservada${NC}"
-    fi
-    
-    # 7. Limpiar archivos temporales
-    echo -e "${BLUE}7. Limpiando archivos temporales...${NC}"
-    
-    # Build del Frontend
-    if [ -d "Frontend/build" ]; then
-        echo -e "${YELLOW}  → Eliminando Frontend/build/...${NC}"
-        rm -rf Frontend/build/
-    fi
-    
-    # Binario del agente
-    if [ -f "Backend/Agente/agente" ]; then
-        echo -e "${YELLOW}  → Eliminando binario del agente...${NC}"
-        rm -f Backend/Agente/agente
-    fi
-    
-    # Módulos compilados
-    if ls Modulos/*.ko &> /dev/null; then
-        echo -e "${YELLOW}  → Eliminando módulos compilados (.ko)...${NC}"
-        rm -f Modulos/*.ko
-        rm -f Modulos/*.o Modulos/*.mod.c Modulos/.*.cmd 2>/dev/null || true
-        rm -rf Modulos/.tmp_versions/ 2>/dev/null || true
-    fi
-    
-    # Reportes de Locust
-    if [ -d "Locust/reports" ]; then
-        echo -e "${YELLOW}  → Eliminando reportes de Locust...${NC}"
-        rm -rf Locust/reports/
-    fi
-    
-    # Logs y archivos temporales
-    rm -f *.log nohup.out 2>/dev/null || true
-    
-    echo -e "${GREEN}  ✓ Archivos temporales limpiados${NC}"
-    
-    # 8. Limpiar configuraciones temporales
-    echo -e "${BLUE}8. Limpiando configuraciones temporales...${NC}"
-    
-    # Restaurar .env original del Frontend si existe backup
-    if [ -f "Frontend/.env.backup" ]; then
-        echo -e "${YELLOW}  → Restaurando Frontend/.env original...${NC}"
-        mv Frontend/.env.backup Frontend/.env
-    fi
-    
-    echo -e "${GREEN}  ✓ Configuraciones limpiadas${NC}"
-}
-
-# Función para mostrar resumen final
-show_final_summary() {
-    echo
-    echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║                                                            ║${NC}"
-    echo -e "${GREEN}║              ${YELLOW}LIMPIEZA COMPLETA FINALIZADA${GREEN}                 ║${NC}"
-    echo -e "${GREEN}║                                                            ║${NC}"
-    echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
-    echo
-    echo -e "${GREEN}✅ Todos los componentes del proyecto han sido eliminados:${NC}"
-    echo -e "${BLUE}   • Contenedores Docker detenidos y eliminados${NC}"
-    echo -e "${BLUE}   • Imágenes Docker del proyecto eliminadas${NC}"
-    echo -e "${BLUE}   • Namespace de Kubernetes eliminado${NC}"
-    echo -e "${BLUE}   • Minikube detenido${NC}"
-    echo -e "${BLUE}   • Módulos del kernel descargados${NC}"
-    echo -e "${BLUE}   • Procesos nativos detenidos${NC}"
-    echo -e "${BLUE}   • Archivos temporales eliminados${NC}"
-    echo
-}
-
-# MAIN - Función principal
-main() {
-    # Verificar componentes activos
-    check_active_components
-    
-    echo
-    echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${RED}║                     ⚠️  ADVERTENCIA  ⚠️                     ║${NC}"
-    echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
-    echo
-    echo -e "${RED}Esta operación eliminará COMPLETAMENTE todos los componentes del proyecto:${NC}"
-    echo
-    echo -e "${YELLOW}🗑️  Componentes que serán eliminados:${NC}"
-    echo -e "${BLUE}   • Namespace Kubernetes (so1-fase2) con todos sus pods${NC}"
-    echo -e "${BLUE}   • Contenedores Docker (frontend-local, agente-*)${NC}"
-    echo -e "${BLUE}   • Imágenes Docker del proyecto (bismarckr/*-fase2)${NC}"
-    echo -e "${BLUE}   • Minikube cluster (será detenido)${NC}"
-    echo -e "${BLUE}   • Módulos del kernel (cpu/ram/procesos_201708880)${NC}"
-    echo -e "${BLUE}   • Procesos nativos (agente, locust)${NC}"
-    echo -e "${BLUE}   • Archivos compilados y temporales${NC}"
-    echo -e "${BLUE}   • Configuraciones temporales${NC}"
-    echo
-    echo -e "${YELLOW}📋 Se preguntará opcionalmente por:${NC}"
-    echo -e "${BLUE}   • Base de datos MySQL 'monitoring'${NC}"
-    echo
-    echo -e "${RED}⚠️  Esta acción NO se puede deshacer ⚠️${NC}"
-    echo
-    
-    # Confirmación principal
-    read -p "¿Estás completamente seguro de continuar con la limpieza? (escriba 'CONFIRMAR'): " confirmacion
-    
-    if [[ "$confirmacion" != "CONFIRMAR" ]]; then
-        echo
-        echo -e "${YELLOW}╔════════════════════════════════════════════════════════════╗${NC}"
-        echo -e "${YELLOW}║                   OPERACIÓN CANCELADA                     ║${NC}"
-        echo -e "${YELLOW}╚════════════════════════════════════════════════════════════╝${NC}"
-        echo -e "${YELLOW}No se realizaron cambios en el sistema.${NC}"
-        exit 0
-    fi
-    
-    # Confirmación final
-    echo
-    read -p "Última confirmación - ¿Proceder con la eliminación? (s/N): " final_confirmation
-    
-    if [[ ! $final_confirmation =~ ^[Ss]$ ]]; then
-        echo -e "${YELLOW}Operación cancelada por el usuario.${NC}"
-        exit 0
-    fi
-    
-    echo
-    echo -e "${YELLOW}⏳ Iniciando limpieza completa en 3 segundos...${NC}"
-    sleep 1
-    echo -e "${YELLOW}⏳ 2...${NC}"
-    sleep 1  
-    echo -e "${YELLOW}⏳ 1...${NC}"
-    sleep 1
-    echo
-    
-    # Ejecutar limpieza
-    perform_cleanup
-    
-    # Mostrar resumen final
-    show_final_summary
-}
-
-# Verificar permisos
-if [ "$EUID" -eq 0 ]; then
-    echo -e "${YELLOW}⚠️  Ejecutándose como root. Algunos comandos pueden requerir permisos de usuario.${NC}"
+    # Limpiar recursos huérfanos
+    echo -e "${YELLOW}  → Limpiando recursos huérfanos...${NC}"
+    kubectl delete pods --all-namespaces --field-selector=status.phase=Failed &>/dev/null || true
+    echo -e "${GREEN}  ✓ Recursos huérfanos limpiados${NC}"
+else
+    echo -e "${BLUE}  → kubectl no está instalado${NC}"
 fi
 
-# Ejecutar función principal
-main "$@"
+# 4. Limpiar Minikube
+echo -e "${YELLOW}4. Limpiando Minikube...${NC}"
+if command_exists minikube; then
+    echo -e "${YELLOW}  → Deteniendo Minikube...${NC}"
+    minikube stop &>/dev/null
+    
+    read -p "$(echo -e ${YELLOW}¿Eliminar completamente el cluster de Minikube? (s/N): ${NC})" delete_minikube
+    if [[ $delete_minikube =~ ^[SsYy]$ ]]; then
+        echo -e "${YELLOW}  → Eliminando cluster de Minikube...${NC}"
+        minikube delete &>/dev/null
+        echo -e "${GREEN}  ✓ Minikube eliminado completamente${NC}"
+    else
+        echo -e "${GREEN}  ✓ Minikube detenido${NC}"
+    fi
+else
+    echo -e "${BLUE}  → Minikube no está instalado${NC}"
+fi
+
+# 5. Detener procesos nativos
+echo -e "${YELLOW}5. Deteniendo procesos nativos...${NC}"
+PROCESSES=("locust" "python.*app.py" "node.*index.js" "python.*agente.py")
+
+for process in "${PROCESSES[@]}"; do
+    PIDS=$(pgrep -f "$process" 2>/dev/null || true)
+    if [ -n "$PIDS" ]; then
+        echo -e "${YELLOW}  → Deteniendo proceso: $process${NC}"
+        echo "$PIDS" | xargs kill -9 &>/dev/null || true
+    fi
+done
+
+echo -e "${GREEN}  ✓ Procesos nativos detenidos${NC}"
+
+# 6. Limpiar MySQL (función mejorada)
+cleanup_mysql
+
+# 7. Limpiar archivos temporales
+echo -e "${YELLOW}7. Limpiando archivos temporales...${NC}"
+TEMP_PATTERNS=("/tmp/*fase2*" "/tmp/*monitor*" "/tmp/*locust*" "/tmp/docker_build_*")
+
+for pattern in "${TEMP_PATTERNS[@]}"; do
+    find ${pattern%/*} -name "${pattern##*/}" -type f -exec rm -f {} \; 2>/dev/null || true
+done
+
+echo -e "${GREEN}  ✓ Archivos temporales limpiados${NC}"
+
+# 8. Limpiar configuraciones temporales
+echo -e "${YELLOW}8. Limpiando configuraciones temporales...${NC}"
+
+# Limpiar archivos .env.backup
+find . -name ".env.backup" -type f -exec rm -f {} \; 2>/dev/null || true
+
+# Limpiar logs locales
+find . -name "*.log" -path "*/logs/*" -exec rm -f {} \; 2>/dev/null || true
+
+# Limpiar archivos de build temporales
+find . -name "build" -type d -path "*/Frontend/*" -exec rm -rf {} \; 2>/dev/null || true
+find . -name "node_modules" -path "*/Frontend/*" -exec rm -rf {} \; 2>/dev/null || true
+
+echo -e "${GREEN}  ✓ Configuraciones limpiadas${NC}"
+
+# Verificar limpieza
+verify_cleanup
+
+echo
+echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║                                                            ║${NC}"
+echo -e "${GREEN}║              LIMPIEZA COMPLETA FINALIZADA                 ║${NC}"
+echo -e "${GREEN}║                                                            ║${NC}"
+echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
+
+echo
+echo -e "${GREEN}✅ Todos los componentes del proyecto Fase 2 han sido procesados:${NC}"
+echo -e "${BLUE}   • Contenedores Docker detenidos y eliminados${NC}"
+echo -e "${BLUE}   • Imágenes Docker del proyecto eliminadas (si se seleccionó)${NC}"
+echo -e "${BLUE}   • Namespaces de Kubernetes eliminados${NC}"
+echo -e "${BLUE}   • Minikube detenido/eliminado${NC}"
+echo -e "${BLUE}   • Procesos nativos detenidos${NC}"
+echo -e "${BLUE}   • Base de datos MySQL limpiada (si fue posible)${NC}"
+echo -e "${BLUE}   • Archivos temporales eliminados${NC}"
+echo
+
+echo -e "${YELLOW}📋 Para verificar manualmente:${NC}"
+echo -e "${BLUE}   docker ps -a | grep fase2${NC}"
+echo -e "${BLUE}   kubectl get namespaces${NC}"
+echo -e "${BLUE}   minikube status${NC}"
+echo -e "${BLUE}   mysql -u root -e 'SHOW DATABASES;'${NC}"
+
+echo
+echo -e "${GREEN}¡Limpieza completada! El sistema está listo para una nueva instalación.${NC}"
