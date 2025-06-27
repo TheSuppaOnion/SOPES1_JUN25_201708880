@@ -13,45 +13,16 @@ echo -e "${BLUE}║                                                            �
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
 echo
 
-# Verificar Node.js y npm
-check_nodejs() {
-    echo -e "${YELLOW}Verificando Node.js y npm...${NC}"
-    
-    if ! command -v node &> /dev/null; then
-        echo -e "${YELLOW}Node.js no está instalado, instalando automáticamente...${NC}"
-        curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-        sudo apt-get install -y nodejs
-        
-        if ! command -v node &> /dev/null; then
-            echo -e "${RED}Error: No se pudo instalar Node.js automáticamente${NC}"
-            echo -e "${YELLOW}Instala Node.js manualmente: sudo apt install nodejs npm${NC}"
-            exit 1
-        fi
-    fi
-    
-    if ! command -v npm &> /dev/null; then
-        echo -e "${YELLOW}npm no está instalado, instalando...${NC}"
-        sudo apt install npm -y
-    fi
-    
-    NODE_VERSION=$(node --version)
-    NPM_VERSION=$(npm --version)
-    echo -e "${GREEN}✓ Node.js $NODE_VERSION disponible${NC}"
-    echo -e "${GREEN}✓ npm $NPM_VERSION disponible${NC}"
-}
-
 # Verificar Docker
 check_docker() {
     echo -e "${YELLOW}Verificando Docker...${NC}"
     if ! command -v docker &> /dev/null; then
-        echo -e "${RED}Docker no está instalado${NC}"
-        echo -e "${YELLOW}Instala Docker y vuelve a ejecutar este script${NC}"
+        echo -e "${RED}✗ Docker no está instalado${NC}"
         exit 1
     fi
     
     if ! docker info &> /dev/null; then
-        echo -e "${RED}Docker no está ejecutándose${NC}"
-        echo -e "${YELLOW}Inicia Docker y vuelve a ejecutar este script${NC}"
+        echo -e "${RED}✗ Docker no está ejecutándose${NC}"
         exit 1
     fi
     
@@ -62,9 +33,7 @@ check_docker() {
 create_react_structure() {
     echo -e "${YELLOW}Creando estructura del proyecto React...${NC}"
     
-    # Crear directorio Frontend si no existe
     if [ ! -d "Frontend" ]; then
-        echo -e "${YELLOW}  → Creando directorio Frontend/...${NC}"
         mkdir -p Frontend
     fi
     
@@ -159,7 +128,7 @@ EOF
     <div id="root">
       <div id="loading">
         <div>
-          <h2>🔄 Cargando Sistema de Monitoreo...</h2>
+          <h2>Cargando Sistema de Monitoreo...</h2>
           <p>Inicializando componentes de React...</p>
         </div>
       </div>
@@ -304,7 +273,7 @@ function App() {
     <div className="App">
       <header className="header">
         <div className="container">
-          <h1>🖥️ Sistema de Monitoreo - SO1 Fase 2</h1>
+          <h1>Sistema de Monitoreo - SO1 Fase 2</h1>
           <p>Bismarck Romero - 201708880</p>
           <div className="connection-status">
             <span className={`status-indicator ${connectionStatus}`}></span>
@@ -321,7 +290,7 @@ function App() {
         <div className="metrics-grid">
           {/* Métrica de CPU */}
           <div className="metric-card">
-            <h3>🔥 Uso de CPU</h3>
+            <h3>Uso de CPU</h3>
             <div className="metric-value">
               {metrics.cpu.porcentaje_uso.toFixed(1)}%
             </div>
@@ -335,7 +304,7 @@ function App() {
 
           {/* Métrica de RAM */}
           <div className="metric-card">
-            <h3>💾 Uso de RAM</h3>
+            <h3>Uso de RAM</h3>
             <div className="metric-value">
               {metrics.ram.porcentaje_uso.toFixed(1)}%
             </div>
@@ -353,7 +322,7 @@ function App() {
 
           {/* Métrica de Procesos */}
           <div className="metric-card">
-            <h3>⚙️ Procesos del Sistema</h3>
+            <h3>Procesos del Sistema</h3>
             <div className="metric-value">
               {metrics.procesos.total_procesos}
             </div>
@@ -366,7 +335,7 @@ function App() {
 
         {/* Información de configuración */}
         <div className="config-info">
-          <h3>🔧 Configuración de APIs</h3>
+          <h3>Configuración de APIs</h3>
           <div className="config-grid">
             <div>
               <strong>API Node.js:</strong> {API_BASE}
@@ -598,7 +567,7 @@ EOF
 }
 EOF
     
-    # 4. Crear Dockerfile
+    # 4. Crear Dockerfile para build
     echo -e "${YELLOW}  → Creando Dockerfile...${NC}"
     cat > Dockerfile << 'EOF'
 # Etapa 1: Construir la aplicación React
@@ -707,27 +676,24 @@ http {
             add_header Content-Type application/json;
         }
 
-        # Proxy para API Node.js (si las APIs están en Kubernetes)
+        # Proxy para API Node.js
         location /api {
-            # Intentar conectar con diferentes puertos comunes de Minikube
-            proxy_pass http://192.168.49.1:30001;  # Puerto típico de NodePort
+            proxy_pass http://192.168.49.2:30001;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
             
-            # Configuración de timeouts
             proxy_connect_timeout 5s;
             proxy_send_timeout 60s;
             proxy_read_timeout 60s;
             
-            # Manejo de errores
             proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
         }
 
         # Proxy para API Python
         location /api-python {
-            proxy_pass http://192.168.49.1:30002;  # Puerto típico de NodePort
+            proxy_pass http://192.168.49.2:30002;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -742,7 +708,7 @@ http {
 
         # Proxy para WebSocket API
         location /websocket {
-            proxy_pass http://192.168.49.1:30003;  # Puerto típico de NodePort
+            proxy_pass http://192.168.49.2:30003;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";
@@ -756,7 +722,6 @@ http {
             proxy_read_timeout 60s;
         }
 
-        # Página de error personalizada
         error_page 404 /index.html;
         error_page 500 502 503 504 /50x.html;
         
@@ -784,247 +749,72 @@ WDS_SOCKET_PORT=0
 FAST_REFRESH=false
 EOF
     
-    # 7. Crear .gitignore
-    echo -e "${YELLOW}  → Creando .gitignore...${NC}"
-    cat > .gitignore << 'EOF'
-# Dependencies
-node_modules/
-/.pnp
-.pnp.js
-
-# Testing
-/coverage
-
-# Production
-/build
-
-# Misc
-.DS_Store
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# Logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# IDE
-.vscode/
-.idea/
-
-# OS
-Thumbs.db
-EOF
-    
     echo -e "${GREEN}✓ Estructura del proyecto React creada automáticamente${NC}"
     cd ..
 }
 
-# Configurar variables de entorno para Docker
-configure_environment() {
-    echo -e "${YELLOW}Configurando variables de entorno para Docker...${NC}"
+# Hacer build usando Docker (evita problemas de dependencias locales)
+build_with_docker() {
+    echo -e "${YELLOW}Construyendo React app usando Docker...${NC}"
     
     cd Frontend
     
-    # Crear backup del .env original si existe
-    if [ -f ".env" ] && [ ! -f ".env.backup" ]; then
-        echo -e "${YELLOW}  → Creando backup de .env original...${NC}"
-        cp .env .env.backup
-    fi
-    
-    # Función para obtener puerto con fallback robusto
-    get_service_port() {
-        local service_name="$1"
-        local default_port="$2"
-        local namespace="${3:-so1-fase2}"
-        
-        echo -e "${BLUE}    Consultando puerto para $service_name...${NC}"
-        
-        # Intentar obtener puerto del servicio de Kubernetes
-        local port=$(kubectl get service "$service_name" -n "$namespace" -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null)
-        
-        # Verificar que el puerto no esté vacío, sea null, o sea inválido
-        if [ -z "$port" ] || [ "$port" = "null" ] || [ "$port" = "<no value>" ] || ! [[ "$port" =~ ^[0-9]+$ ]]; then
-            echo -e "${YELLOW}      Puerto no disponible, usando puerto por defecto: $default_port${NC}"
-            echo "$default_port"
-        else
-            echo -e "${GREEN}      Puerto detectado: $port${NC}"
-            echo "$port"
-        fi
-    }
-    
-    # Obtener IP de Minikube
-    MINIKUBE_IP=$(minikube ip 2>/dev/null)
-    if [ -z "$MINIKUBE_IP" ] || [ "$MINIKUBE_IP" = "<no value>" ]; then
-        MINIKUBE_IP="192.168.49.2"
-        echo -e "${YELLOW}  → IP de Minikube no disponible, usando IP por defecto: $MINIKUBE_IP${NC}"
-    else
-        echo -e "${GREEN}  → IP de Minikube detectada: $MINIKUBE_IP${NC}"
-    fi
-    
-    # Obtener puertos con manejo robusto de errores
-    echo -e "${BLUE}  → Detectando puertos de servicios...${NC}"
-    
-    NODEJS_PORT=$(get_service_port "api-nodejs-service" "30001")
-    PYTHON_PORT=$(get_service_port "api-python-service" "30002")
-    WEBSOCKET_PORT=$(get_service_port "websocket-api-service" "30003")
-    
-    echo -e "${BLUE}  Configuración final:${NC}"
-    echo -e "${BLUE}    Minikube IP: $MINIKUBE_IP${NC}"
-    echo -e "${BLUE}    API Node.js Port: $NODEJS_PORT${NC}"
-    echo -e "${BLUE}    API Python Port: $PYTHON_PORT${NC}"
-    echo -e "${BLUE}    WebSocket Port: $WEBSOCKET_PORT${NC}"
-    
-    # Actualizar nginx.conf de forma más robusta
-    if [ -f "nginx.conf" ]; then
-        echo -e "${YELLOW}  → Actualizando nginx.conf con puertos reales...${NC}"
-        
-        # Crear archivo temporal para edición segura
-        cp nginx.conf nginx.conf.backup
-        
-        # Usar sed con delimitadores diferentes para evitar problemas con /
-        sed "s|proxy_pass http://192.168.49.1:30001;|proxy_pass http://$MINIKUBE_IP:$NODEJS_PORT;|g" nginx.conf.backup > nginx.conf.tmp
-        sed "s|proxy_pass http://192.168.49.1:30002;|proxy_pass http://$MINIKUBE_IP:$PYTHON_PORT;|g" nginx.conf.tmp > nginx.conf.tmp2
-        sed "s|proxy_pass http://192.168.49.1:30003;|proxy_pass http://$MINIKUBE_IP:$WEBSOCKET_PORT;|g" nginx.conf.tmp2 > nginx.conf
-        
-        # Limpiar archivos temporales
-        rm -f nginx.conf.tmp nginx.conf.tmp2
-        
-        echo -e "${GREEN}    ✓ nginx.conf actualizado${NC}"
-    else
-        echo -e "${YELLOW}  ⚠ nginx.conf no encontrado, se usará configuración por defecto${NC}"
-    fi
-    
-    # Actualizar .env con configuración final
-    cat > .env << EOF
-# Configuración para Frontend en Docker
-REACT_APP_API_URL=/api
-REACT_APP_API_PYTHON_URL=/api-python
-REACT_APP_WEBSOCKET_URL=/websocket
+    # Crear Dockerfile temporal solo para build
+    echo -e "${YELLOW}  → Creando Dockerfile temporal para build...${NC}"
+    cat > Dockerfile.build << 'EOF'
+FROM node:18-alpine
 
-# Configuración de conexión (para referencia)
-MINIKUBE_IP=$MINIKUBE_IP
-NODEJS_PORT=$NODEJS_PORT
-PYTHON_PORT=$PYTHON_PORT
-WEBSOCKET_PORT=$WEBSOCKET_PORT
+WORKDIR /app
 
-# Puerto interno del contenedor
-PORT=80
+# Copiar package.json y package-lock.json
+COPY package*.json ./
 
-# Configuración de build
-GENERATE_SOURCEMAP=false
-WDS_SOCKET_PORT=0
-FAST_REFRESH=false
+# Instalar dependencias
+RUN npm ci
+
+# Copiar código fuente
+COPY . .
+
+# Construir la aplicación
+RUN npm run build
+
+# Comando por defecto
+CMD ["ls", "-la", "build/"]
 EOF
     
-    echo -e "${GREEN}✓ Variables de entorno configuradas correctamente${NC}"
-    cd ..
-}
-
-# Instalar dependencias de React
-install_react_dependencies() {
-    echo -e "${YELLOW}Instalando dependencias de React...${NC}"
-    
-    cd Frontend
-    
-    # Limpiar package-lock.json conflictivo si existe
-    if [ -f "package-lock.json" ]; then
-        echo -e "${YELLOW}  → Eliminando package-lock.json para evitar conflictos...${NC}"
-        rm -f package-lock.json
-    fi
-    
-    # Limpiar node_modules si hay problemas
-    if [ -d "node_modules" ]; then
-        echo -e "${YELLOW}  → Limpiando node_modules existente...${NC}"
-        rm -rf node_modules
-    fi
-    
-    # Limpiar caché de npm
-    npm cache clean --force 2>/dev/null || true
-    
-    echo -e "${YELLOW}  → Instalando dependencias con npm...${NC}"
-    
-    # Instalar dependencias con configuración más permisiva
-    npm install --no-audit --no-fund --legacy-peer-deps
+    # Construir imagen temporal
+    echo -e "${YELLOW}  → Construyendo imagen temporal...${NC}"
+    docker build -f Dockerfile.build -t react-builder-temp .
     
     if [ $? -ne 0 ]; then
-        echo -e "${RED}Error al instalar dependencias de React${NC}"
-        echo -e "${YELLOW}Intentando instalación alternativa...${NC}"
+        echo -e "${RED}✗ Error al construir imagen temporal${NC}"
+        rm -f Dockerfile.build
+        exit 1
+    fi
+    
+    # Ejecutar build y extraer archivos
+    echo -e "${YELLOW}  → Ejecutando build dentro del contenedor...${NC}"
+    docker run --rm -v "$(pwd)/build:/output" react-builder-temp sh -c "cp -r build/* /output/"
+    
+    if [ $? -eq 0 ] && [ -d "build" ] && [ -f "build/index.html" ]; then
+        BUILD_SIZE=$(du -sh build/ | cut -f1)
+        echo -e "${GREEN}✓ Build completado exitosamente (tamaño: $BUILD_SIZE)${NC}"
         
-        # Intento más agresivo con force
-        npm install --force --no-audit --no-fund
-        
-        if [ $? -ne 0 ]; then
-            echo -e "${RED}Error persistente al instalar dependencias${NC}"
-            echo -e "${YELLOW}Verifica que Node.js y npm estén actualizados${NC}"
-            exit 1
-        fi
-    fi
-    
-    echo -e "${GREEN}  ✓ Dependencias instaladas correctamente${NC}"
-    cd ..
-}
-
-# Verificar y probar compilación de React
-verify_react_build() {
-    echo -e "${YELLOW}Verificando compilación de React...${NC}"
-    
-    cd Frontend
-    
-    # Verificar que las dependencias están instaladas
-    if [ ! -d "node_modules" ]; then
-        echo -e "${RED}Error: node_modules no encontrado. Ejecutando instalación...${NC}"
-        install_react_dependencies
-    fi
-    
-    # Probar compilación
-    echo -e "${YELLOW}  → Probando compilación de React (npm run build)...${NC}"
-    
-    # Limpiar build anterior si existe
-    if [ -d "build" ]; then
-        echo -e "${YELLOW}  → Limpiando build anterior...${NC}"
-        rm -rf build/
-    fi
-    
-    # Ejecutar build
-    npm run build
-    
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}Error en la compilación de React${NC}"
-        echo -e "${YELLOW}Revisa los errores anteriores y corrige el código React${NC}"
+        # Verificar contenido del build
+        JS_FILES=$(find build/static/js -name "*.js" 2>/dev/null | wc -l)
+        CSS_FILES=$(find build/static/css -name "*.css" 2>/dev/null | wc -l)
+        echo -e "${GREEN}✓ Archivos JavaScript: $JS_FILES${NC}"
+        echo -e "${GREEN}✓ Archivos CSS: $CSS_FILES${NC}"
+    else
+        echo -e "${RED}✗ Build falló o archivos no generados${NC}"
+        rm -f Dockerfile.build
         exit 1
     fi
     
-    # Verificar que el build se creó correctamente
-    if [ ! -d "build" ]; then
-        echo -e "${RED}Error: Directorio build/ no se creó${NC}"
-        exit 1
-    fi
+    # Limpiar imagen temporal
+    docker rmi react-builder-temp >/dev/null 2>&1
+    rm -f Dockerfile.build
     
-    if [ ! -f "build/index.html" ]; then
-        echo -e "${RED}Error: build/index.html no se generó${NC}"
-        exit 1
-    fi
-    
-    # Verificar tamaño del build
-    BUILD_SIZE=$(du -sh build/ | cut -f1)
-    echo -e "${GREEN}  ✓ Build de React generado correctamente (tamaño: $BUILD_SIZE)${NC}"
-    
-    # Verificar contenido del build
-    echo -e "${YELLOW}  → Verificando contenido del build...${NC}"
-    if ls build/static/js/*.js &> /dev/null; then
-        JS_FILES=$(ls build/static/js/*.js | wc -l)
-        echo -e "${GREEN}  ✓ Archivos JavaScript generados: $JS_FILES${NC}"
-    fi
-    
-    if ls build/static/css/*.css &> /dev/null; then
-        CSS_FILES=$(ls build/static/css/*.css | wc -l)
-        echo -e "${GREEN}  ✓ Archivos CSS generados: $CSS_FILES${NC}"
-    fi
-    
-    echo -e "${GREEN}✓ Compilación de React verificada exitosamente${NC}"
     cd ..
 }
 
@@ -1036,93 +826,41 @@ build_frontend_image() {
     
     # Verificar que el build existe
     if [ ! -d "build" ]; then
-        echo -e "${YELLOW}⚠ Directorio build/ no encontrado, construyendo React app...${NC}"
-        verify_react_build
+        echo -e "${YELLOW}  → Build no encontrado, construyendo...${NC}"
+        build_with_docker
     fi
     
-    # Verificar archivos esenciales para Docker
-    required_files=("Dockerfile" "package.json" "src/App.js" "public/index.html" "nginx.conf")
-    missing_files=()
-    
-    for file in "${required_files[@]}"; do
-        if [ ! -f "$file" ]; then
-            missing_files+=("$file")
-        fi
-    done
-    
-    if [ ${#missing_files[@]} -gt 0 ]; then
-        echo -e "${RED}Error: Archivos faltantes para construcción Docker:${NC}"
-        printf '%s\n' "${missing_files[@]}"
-        exit 1
-    fi
-    
-    # Mostrar información del build antes de dockerizar
-    echo -e "${YELLOW}  → Información del build a dockerizar:${NC}"
-    echo -e "${BLUE}    Build size: $(du -sh build/ | cut -f1)${NC}"
-    echo -e "${BLUE}    Files count: $(find build/ -type f | wc -l)${NC}"
-    echo -e "${BLUE}    Dockerfile: $([ -f Dockerfile ] && echo "✓ Presente" || echo "✗ Faltante")${NC}"
-    echo -e "${BLUE}    nginx.conf: $([ -f nginx.conf ] && echo "✓ Presente" || echo "✗ Faltante")${NC}"
-    
-    # Mostrar las primeras líneas del Dockerfile para verificación
-    echo -e "${YELLOW}  → Verificando Dockerfile:${NC}"
-    head -5 Dockerfile | sed 's/^/    /'
-    
-    # Limpiar imagen anterior si existe
-    echo -e "${YELLOW}  → Limpiando imagen anterior...${NC}"
+    # Limpiar imagen anterior
     docker rmi bismarckr/frontend-fase2:latest 2>/dev/null || true
     
-    # Construir imagen Docker con tu Dockerfile
-    echo -e "${YELLOW}  → Ejecutando: docker build -t bismarckr/frontend-fase2:latest .${NC}"
+    # Construir imagen final
+    echo -e "${YELLOW}  → Construyendo imagen final...${NC}"
+    docker build -t bismarckr/frontend-fase2:latest .
     
-    # Construir con output más detallado
-    docker build -t bismarckr/frontend-fase2:latest . 2>&1 | tee /tmp/docker_build_frontend.log
-    
-    if [ ${PIPESTATUS[0]} -eq 0 ]; then
-        echo -e "${GREEN}✓ Imagen Docker del Frontend construida exitosamente${NC}"
-        
-        # Mostrar información de la imagen
-        IMAGE_INFO=$(docker images bismarckr/frontend-fase2:latest --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}" | tail -1)
-        echo -e "${BLUE}  Información de la imagen: $IMAGE_INFO${NC}"
-        
-        # Verificar que la imagen se puede ejecutar
-        echo -e "${YELLOW}  → Verificando que la imagen es ejecutable...${NC}"
-        docker run --rm bismarckr/frontend-fase2:latest nginx -t 2>/dev/null
-        if [ $? -eq 0 ]; then
-            echo -e "${GREEN}    ✓ Imagen válida y ejecutable${NC}"
-        else
-            echo -e "${YELLOW}    ⚠ Imagen construida pero puede tener problemas de configuración${NC}"
-        fi
-        
+    if [ $? -eq 0 ]; then
+        IMAGE_SIZE=$(docker images bismarckr/frontend-fase2:latest --format "{{.Size}}")
+        echo -e "${GREEN}✓ Imagen Docker construida exitosamente (tamaño: $IMAGE_SIZE)${NC}"
     else
-        echo -e "${RED}✗ Error al construir la imagen Docker del Frontend${NC}"
-        echo -e "${YELLOW}  → Mostrando últimas líneas del log de error:${NC}"
-        tail -20 /tmp/docker_build_frontend.log | sed 's/^/    /'
-        
-        echo -e "${YELLOW}  → Verificando espacio en disco:${NC}"
-        df -h . | sed 's/^/    /'
-        
+        echo -e "${RED}✗ Error al construir imagen Docker${NC}"
         exit 1
     fi
     
     cd ..
 }
 
-
 # Ejecutar contenedor del Frontend
 run_frontend_container() {
     echo -e "${YELLOW}Ejecutando contenedor del Frontend...${NC}"
     
-    # Detener contenedor anterior si existe
-    echo -e "${YELLOW}Limpiando contenedores anteriores...${NC}"
+    # Detener contenedor anterior
     docker stop frontend-local 2>/dev/null || true
     docker rm frontend-local 2>/dev/null || true
     
-    # Obtener IP de Minikube para conectar con las APIs
+    # Obtener IP de Minikube
     MINIKUBE_IP=$(minikube ip 2>/dev/null || echo "192.168.49.2")
-    echo -e "${BLUE}IP de Minikube detectada: $MINIKUBE_IP${NC}"
+    echo -e "${BLUE}IP de Minikube: $MINIKUBE_IP${NC}"
     
-    # Ejecutar contenedor con conexión a Minikube
-    echo -e "${YELLOW}Iniciando contenedor del Frontend...${NC}"
+    # Ejecutar contenedor
     docker run -d \
         --name frontend-local \
         --restart unless-stopped \
@@ -1133,127 +871,75 @@ run_frontend_container() {
         bismarckr/frontend-fase2:latest
     
     if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✓ Contenedor del Frontend iniciado correctamente${NC}"
-        
-        # Esperar un momento para que el contenedor se inicie
+        echo -e "${GREEN}✓ Contenedor iniciado correctamente${NC}"
         sleep 3
         
-        # Verificar que está corriendo
         if docker ps | grep -q "frontend-local"; then
-            echo -e "${GREEN}✓ Frontend ejecutándose correctamente${NC}"
-        else
-            echo -e "${RED}Error: El contenedor no está ejecutándose${NC}"
-            echo -e "${YELLOW}Logs del contenedor:${NC}"
-            docker logs frontend-local
-            exit 1
+            echo -e "${GREEN}✓ Frontend ejecutándose en http://localhost:3001${NC}"
         fi
     else
-        echo -e "${RED}Error al iniciar el contenedor del Frontend${NC}"
+        echo -e "${RED}✗ Error al iniciar contenedor${NC}"
         exit 1
     fi
 }
 
-# Verificar estado y mostrar información
+# Mostrar estado
 show_status() {
     echo -e "${YELLOW}=== ESTADO DEL FRONTEND ===${NC}"
     
-    # Estado del contenedor
-    echo -e "${BLUE}Contenedor Docker:${NC}"
     if docker ps | grep -q "frontend-local"; then
         echo -e "${GREEN}✓ Contenedor ejecutándose${NC}"
         docker ps --filter name=frontend-local --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
     else
-        echo -e "${RED}✗ Contenedor no está ejecutándose${NC}"
+        echo -e "${RED}✗ Contenedor no ejecutándose${NC}"
     fi
     
-    # Verificar conectividad
-    echo -e "${BLUE}Verificando conectividad:${NC}"
-    sleep 2
-    if curl -s --connect-timeout 5 http://localhost:3001/health > /dev/null 2>&1; then
-        echo -e "${GREEN}✓ Frontend accesible en http://localhost:3001${NC}"
-    elif curl -s --connect-timeout 5 http://localhost:3001/ > /dev/null 2>&1; then
-        echo -e "${GREEN}✓ Frontend accesible en http://localhost:3001${NC}"
-        echo -e "${YELLOW}  (endpoint /health no disponible, pero la app responde)${NC}"
-    else
-        echo -e "${YELLOW}⚠ Frontend puede estar iniciando, intenta acceder en unos momentos${NC}"
-    fi
-    
-    # Información del build
     if [ -d "Frontend/build" ]; then
         BUILD_SIZE=$(du -sh Frontend/build/ | cut -f1)
-        echo -e "${BLUE}Build React: ${GREEN}✓ Disponible (tamaño: $BUILD_SIZE)${NC}"
+        echo -e "${BLUE}Build React: ✓ Disponible (tamaño: $BUILD_SIZE)${NC}"
     else
-        echo -e "${BLUE}Build React: ${RED}✗ No disponible${NC}"
+        echo -e "${BLUE}Build React: ✗ No disponible${NC}"
     fi
     
-    # Logs recientes
-    echo -e "${BLUE}Logs recientes:${NC}"
-    docker logs frontend-local --tail 5 2>/dev/null || echo -e "${RED}No hay logs disponibles${NC}"
-}
-
-# Función para mostrar información de uso
-show_usage() {
-    echo
-    echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║                    FRONTEND COMPLETADO                    ║${NC}"
-    echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
-    echo
-    echo -e "${YELLOW}🌐 ACCESO AL FRONTEND:${NC}"
-    echo -e "${GREEN}   http://localhost:3001${NC}                    # Aplicación principal"
-    echo -e "${GREEN}   http://localhost:3001/health${NC}             # Health check"
-    echo
-    echo -e "${YELLOW}🔧 COMANDOS ÚTILES:${NC}"
-    echo -e "${BLUE}  ./setup-frontend-local.sh status     ${NC}# Ver estado actual"
-    echo -e "${BLUE}  ./setup-frontend-local.sh logs       ${NC}# Ver logs en tiempo real"
-    echo -e "${BLUE}  ./setup-frontend-local.sh restart    ${NC}# Reiniciar contenedor"
-    echo -e "${BLUE}  ./setup-frontend-local.sh rebuild    ${NC}# Reconstruir completamente"
-    echo
-    echo -e "${YELLOW}📱 DESARROLLO LOCAL:${NC}"
-    echo -e "${BLUE}  cd Frontend && npm start             ${NC}# Servidor desarrollo (puerto 3000)"
-    echo -e "${BLUE}  cd Frontend && npm run build         ${NC}# Solo compilar React"
-    echo
-    echo -e "${YELLOW}🐳 DOCKER:${NC}"
-    echo -e "${BLUE}  docker logs frontend-local           ${NC}# Ver logs del contenedor"
-    echo -e "${BLUE}  docker exec -it frontend-local sh    ${NC}# Acceder al contenedor"
-    echo -e "${BLUE}  docker restart frontend-local        ${NC}# Reiniciar manualmente"
-    echo
+    if curl -s --connect-timeout 5 http://localhost:3001/ > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ Frontend accesible en http://localhost:3001${NC}"
+    else
+        echo -e "${YELLOW}⚠ Frontend puede estar iniciando${NC}"
+    fi
 }
 
 # Función principal
 main() {
     case "${1:-install}" in
         "install"|"")
-            echo -e "${YELLOW}=== CREACIÓN E INSTALACIÓN AUTOMÁTICA DEL FRONTEND ===${NC}"
-            check_nodejs
+            echo -e "${YELLOW}=== INSTALACIÓN COMPLETA DEL FRONTEND ===${NC}"
             check_docker
-            create_react_structure          # NUEVO: Crear estructura automáticamente
-            configure_environment
-            install_react_dependencies
-            verify_react_build
+            create_react_structure
+            build_with_docker
             build_frontend_image
             run_frontend_container
             show_status
-            show_usage
+            echo
+            echo -e "${GREEN}✓ Frontend listo en http://localhost:3001${NC}"
             ;;
-        "create")
-            echo -e "${YELLOW}Solo creando estructura del proyecto...${NC}"
-            check_nodejs
-            create_react_structure
-            echo -e "${GREEN}✓ Estructura creada. Ejecuta './setup-frontend-local.sh install' para continuar${NC}"
+        "build")
+            echo -e "${YELLOW}Solo construyendo build de React...${NC}"
+            check_docker
+            if [ ! -d "Frontend/src" ]; then
+                create_react_structure
+            fi
+            build_with_docker
+            echo -e "${GREEN}✓ Build completado${NC}"
             ;;
         "start")
-            echo -e "${YELLOW}Iniciando contenedor del Frontend...${NC}"
             docker start frontend-local
-            sleep 2
             show_status
             ;;
         "stop")
-            echo -e "${YELLOW}Deteniendo contenedor del Frontend...${NC}"
             docker stop frontend-local
             echo -e "${GREEN}✓ Frontend detenido${NC}"
             ;;
         "restart")
-            echo -e "${YELLOW}Reiniciando contenedor del Frontend...${NC}"
             docker restart frontend-local
             sleep 3
             show_status
@@ -1262,42 +948,28 @@ main() {
             show_status
             ;;
         "logs")
-            echo -e "${YELLOW}Mostrando logs en tiempo real (Ctrl+C para salir)...${NC}"
             docker logs -f frontend-local
             ;;
         "rebuild")
-            echo -e "${YELLOW}Reconstruyendo imagen y reiniciando...${NC}"
+            check_docker
             docker stop frontend-local 2>/dev/null || true
             docker rm frontend-local 2>/dev/null || true
             docker rmi bismarckr/frontend-fase2:latest 2>/dev/null || true
-            configure_environment
-            verify_react_build
+            build_with_docker
             build_frontend_image
             run_frontend_container
             show_status
             ;;
-        "build-only")
-            echo -e "${YELLOW}Solo construyendo la aplicación React...${NC}"
-            check_nodejs
-            if [ ! -d "Frontend/src" ]; then
-                create_react_structure
-            fi
-            configure_environment
-            install_react_dependencies
-            verify_react_build
-            echo -e "${GREEN}✓ Build de React completado${NC}"
-            ;;
         *)
-            echo -e "${RED}Comando no reconocido: $1${NC}"
-            show_usage
+            echo -e "${RED}✗ Comando no reconocido: $1${NC}"
+            echo -e "${YELLOW}Comandos disponibles: install, build, start, stop, restart, status, logs, rebuild${NC}"
             exit 1
             ;;
     esac
 }
 
-echo
 # Ejecutar función principal
 main "$@"
 
 echo
-echo -e "${GREEN}🎉 Frontend React con Docker configurado automáticamente!${NC}"
+echo -e "${GREEN}✓ Frontend React con Docker configurado${NC}"
