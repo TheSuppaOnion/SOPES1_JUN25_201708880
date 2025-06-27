@@ -6,7 +6,8 @@ RED='\033[0;31m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-echo -e "${YELLOW}=== CONFIGURANDO MYSQL NATIVO LOCAL ===${NC}"
+echo -e "${YELLOW}=== CONFIGURANDO MYSQL PARA TABLA METRICS UNIFICADA ===${NC}"
+echo -e "${BLUE}Configuración para JSON: total_ram, ram_libre, uso_ram, porcentaje_ram, etc.${NC}"
 
 # Función para resetear contraseña de MySQL root
 reset_mysql_root_password() {
@@ -142,8 +143,6 @@ CREATE USER 'monitor'@'%' IDENTIFIED BY 'monitor123';
 -- Dar permisos completos
 GRANT ALL PRIVILEGES ON monitoring.* TO 'monitor'@'localhost';
 GRANT ALL PRIVILEGES ON monitoring.* TO 'monitor'@'%';
-GRANT ALL PRIVILEGES ON *.* TO 'monitor'@'localhost';
-GRANT ALL PRIVILEGES ON *.* TO 'monitor'@'%';
 FLUSH PRIVILEGES;
 
 -- Verificar creación
@@ -158,77 +157,168 @@ else
     exit 1
 fi
 
-# Crear tablas
-echo -e "${YELLOW}Creando tablas...${NC}"
+# Crear tabla unificada METRICS
+echo -e "${YELLOW}Creando tabla unificada METRICS...${NC}"
 mysql -u monitor -pmonitor123 <<EOF
 USE monitoring;
 
-CREATE TABLE IF NOT EXISTS cpu_metrics (
+-- Eliminar tablas antiguas si existen
+DROP TABLE IF EXISTS cpu_metrics;
+DROP TABLE IF EXISTS ram_metrics; 
+DROP TABLE IF EXISTS process_metrics;
+DROP TABLE IF EXISTS metrics_cache;
+
+-- Crear tabla unificada que coincide EXACTAMENTE con tu JSON
+CREATE TABLE IF NOT EXISTS metrics (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    timestamp BIGINT NOT NULL,
-    porcentaje_uso FLOAT NOT NULL,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Campos EXACTOS de tu JSON
+    total_ram BIGINT NOT NULL DEFAULT 0,           -- 2072
+    ram_libre BIGINT NOT NULL DEFAULT 0,          -- 1110552576
+    uso_ram BIGINT NOT NULL DEFAULT 0,            -- 442
+    porcentaje_ram FLOAT NOT NULL DEFAULT 0,      -- 22
+    porcentaje_cpu_uso FLOAT NOT NULL DEFAULT 0,  -- 22
+    porcentaje_cpu_libre FLOAT NOT NULL DEFAULT 0,-- 88
+    procesos_corriendo INT NOT NULL DEFAULT 0,    -- 123
+    total_procesos INT NOT NULL DEFAULT 0,        -- 233
+    procesos_durmiendo INT NOT NULL DEFAULT 0,    -- 65
+    procesos_zombie INT NOT NULL DEFAULT 0,       -- 65
+    procesos_parados INT NOT NULL DEFAULT 0,      -- 65
+    hora DATETIME NOT NULL,                       -- "2025-06-17 02:21:54"
+    
+    -- Metadatos para tracking
+    api_source VARCHAR(50) DEFAULT 'unknown',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_timestamp (timestamp)
+    
+    -- Índices para optimización
+    INDEX idx_timestamp (timestamp),
+    INDEX idx_hora (hora),
+    INDEX idx_api_source (api_source),
+    INDEX idx_recent (timestamp DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Insertar datos de prueba con tu formato EXACTO
+INSERT INTO metrics (
+    total_ram, ram_libre, uso_ram, porcentaje_ram,
+    porcentaje_cpu_uso, porcentaje_cpu_libre,
+    procesos_corriendo, total_procesos, procesos_durmiendo,
+    procesos_zombie, procesos_parados, hora, api_source
+) VALUES (
+    2072, 1110552576, 442, 22.0,
+    22.0, 78.0,
+    123, 233, 65,
+    65, 65, '2025-06-17 02:21:54', 'test_inicial'
 );
 
-CREATE TABLE IF NOT EXISTS ram_metrics (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    timestamp BIGINT NOT NULL,
-    total_bytes BIGINT NOT NULL,
-    libre_bytes BIGINT NOT NULL,
-    uso_bytes BIGINT NOT NULL,
-    porcentaje_uso FLOAT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_timestamp (timestamp)
-);
+-- Verificar estructura y datos
+DESCRIBE metrics;
+SELECT 'Estructura de tabla:' AS info;
+SELECT 
+    total_ram, ram_libre, uso_ram, porcentaje_ram,
+    porcentaje_cpu_uso, porcentaje_cpu_libre,
+    procesos_corriendo, total_procesos, procesos_durmiendo,
+    procesos_zombie, procesos_parados, hora, api_source
+FROM metrics 
+ORDER BY id DESC LIMIT 1;
 
-CREATE TABLE IF NOT EXISTS process_metrics (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    timestamp BIGINT NOT NULL,
-    procesos_corriendo INT NOT NULL,
-    total_procesos INT NOT NULL,
-    procesos_durmiendo INT NOT NULL,
-    procesos_zombie INT NOT NULL,
-    procesos_parados INT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_timestamp (timestamp)
-);
-
-CREATE TABLE IF NOT EXISTS metrics_cache (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    timestamp BIGINT NOT NULL,
-    data JSON NOT NULL,
-    type ENUM('cpu', 'ram', 'procesos') NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_timestamp_type (timestamp, type)
-);
-
-SHOW TABLES;
-SELECT 'Tablas creadas correctamente' AS status;
+SELECT 'Tabla metrics creada correctamente con formato JSON exacto' AS status;
 EOF
+
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}✓ Tabla metrics creada correctamente${NC}"
+else
+    echo -e "${RED}✗ Error al crear tabla metrics${NC}"
+    exit 1
+fi
+
+# Configurar MySQL para conexiones externas
+echo -e "${YELLOW}Configurando MySQL para conexiones externas...${NC}"
+
+# Backup del archivo de configuración
+sudo cp /etc/mysql/mysql.conf.d/mysqld.cnf /etc/mysql/mysql.conf.d/mysqld.cnf.backup 2>/dev/null || true
+
+# Configurar bind-address
+echo -e "${YELLOW}  → Configurando bind-address...${NC}"
+sudo sed -i 's/^bind-address.*/bind-address = 0.0.0.0/' /etc/mysql/mysql.conf.d/mysqld.cnf 2>/dev/null || true
+
+# Si no existe la línea, agregarla
+if ! grep -q "bind-address" /etc/mysql/mysql.conf.d/mysqld.cnf; then
+    echo "bind-address = 0.0.0.0" | sudo tee -a /etc/mysql/mysql.conf.d/mysqld.cnf > /dev/null
+fi
+
+# Reiniciar MySQL
+echo -e "${YELLOW}  → Reiniciando MySQL...${NC}"
+sudo systemctl restart mysql
+sleep 5
+
+# Verificar que está escuchando en todas las interfaces
+if sudo netstat -tlnp | grep ":3306.*0.0.0.0" > /dev/null; then
+    echo -e "${GREEN}✓ MySQL configurado para conexiones externas${NC}"
+else
+    echo -e "${YELLOW}⚠ MySQL puede no estar escuchando en todas las interfaces${NC}"
+    echo -e "${BLUE}Estado actual:${NC}"
+    sudo netstat -tlnp | grep ":3306" || echo "Puerto 3306 no encontrado"
+fi
 
 # Probar conexión final
 echo -e "${YELLOW}Probando conexión final...${NC}"
-if mysql -u monitor -pmonitor123 -e "USE monitoring; SELECT 'Conexión exitosa' AS test;" 2>/dev/null; then
-    echo -e "${GREEN}✓ ¡MySQL configurado correctamente!${NC}"
+if mysql -u monitor -pmonitor123 -e "USE monitoring; SELECT COUNT(*) as registros FROM metrics;" 2>/dev/null; then
+    echo -e "${GREEN}✓ ¡MySQL configurado correctamente con tabla unificada!${NC}"
     
-    # Información de conexión
+    # Mostrar información de conexión
     echo
-    echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║                  CONFIGURACIÓN COMPLETA                   ║${NC}"
-    echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
-    echo -e "${YELLOW}Host:${NC} localhost"
-    echo -e "${YELLOW}Puerto:${NC} 3306"
-    echo -e "${YELLOW}Usuario:${NC} monitor"
-    echo -e "${YELLOW}Contraseña:${NC} monitor123"
-    echo -e "${YELLOW}Base de datos:${NC} monitoring"
+    echo -e "${BLUE}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║                  CONFIGURACIÓN COMPLETA                      ║${NC}"
+    echo -e "${BLUE}╚═══════════════════════════════════════════════════════════════╝${NC}"
     echo
-    echo -e "${YELLOW}String de conexión:${NC}"
-    echo -e "${BLUE}mysql://monitor:monitor123@localhost:3306/monitoring${NC}"
+    echo -e "${YELLOW}📋 Configuración de Base de Datos:${NC}"
+    echo -e "${BLUE}   Host:${NC} localhost"
+    echo -e "${BLUE}   Puerto:${NC} 3306" 
+    echo -e "${BLUE}   Usuario:${NC} monitor"
+    echo -e "${BLUE}   Contraseña:${NC} monitor123"
+    echo -e "${BLUE}   Base de datos:${NC} monitoring"
+    echo -e "${BLUE}   Tabla principal:${NC} metrics"
+    
+    # Mostrar IP de la máquina
     echo
-    echo -e "${YELLOW}Comandos de prueba:${NC}"
-    echo -e "${BLUE}mysql -u monitor -pmonitor123${NC}"
-    echo -e "${BLUE}mysql -u monitor -pmonitor123 -e 'USE monitoring; SHOW TABLES;'${NC}"
+    echo -e "${YELLOW}🌐 IP de esta máquina para APIs:${NC}"
+    VM_IP=$(hostname -I | awk '{print $1}')
+    echo -e "${GREEN}   ${VM_IP}${NC}"
+    echo
+    echo -e "${YELLOW}📝 String de conexión para APIs:${NC}"
+    echo -e "${BLUE}   host: '${VM_IP}' // Usar esta IP en las APIs${NC}"
+    echo
+    echo -e "${YELLOW}🔧 Comandos de prueba:${NC}"
+    echo -e "${BLUE}   mysql -u monitor -pmonitor123${NC}"
+    echo -e "${BLUE}   mysql -u monitor -pmonitor123 -e 'USE monitoring; SELECT * FROM metrics;'${NC}"
+    echo
+    echo -e "${YELLOW}📊 Formato JSON que acepta la tabla:${NC}"
+    echo -e "${BLUE}   {${NC}"
+    echo -e "${BLUE}     \"total_ram\": 2072,${NC}"
+    echo -e "${BLUE}     \"ram_libre\": 1110552576,${NC}"
+    echo -e "${BLUE}     \"uso_ram\": 442,${NC}"
+    echo -e "${BLUE}     \"porcentaje_ram\": 22,${NC}"
+    echo -e "${BLUE}     \"porcentaje_cpu_uso\": 22,${NC}"
+    echo -e "${BLUE}     \"porcentaje_cpu_libre\": 88,${NC}"
+    echo -e "${BLUE}     \"procesos_corriendo\": 123,${NC}"
+    echo -e "${BLUE}     \"total_procesos\": 233,${NC}"
+    echo -e "${BLUE}     \"procesos_durmiendo\": 65,${NC}"
+    echo -e "${BLUE}     \"procesos_zombie\": 65,${NC}"
+    echo -e "${BLUE}     \"procesos_parados\": 65,${NC}"
+    echo -e "${BLUE}     \"hora\": \"2025-06-17 02:21:54\"${NC}"
+    echo -e "${BLUE}   }${NC}"
+    echo
+    echo -e "${YELLOW}🔄 Próximos pasos:${NC}"
+    echo -e "${GREEN}   1. Actualizar las APIs con la IP: ${VM_IP}${NC}"
+    echo -e "${GREEN}   2. Reconstruir imágenes Docker${NC}"
+    echo -e "${GREEN}   3. Redesplegar en Kubernetes${NC}"
+    echo -e "${GREEN}   4. Probar con Locust${NC}"
+    
+    # Verificar datos de prueba
+    echo
+    echo -e "${YELLOW}📊 Datos de prueba en la tabla:${NC}"
+    mysql -u monitor -pmonitor123 -e "USE monitoring; SELECT total_ram, porcentaje_cpu_uso, porcentaje_ram, total_procesos, api_source, hora FROM metrics ORDER BY id DESC LIMIT 3;" 2>/dev/null || echo "No se pudieron mostrar datos"
     
 else
     echo -e "${RED}✗ Error en la conexión final${NC}"
@@ -240,3 +330,7 @@ else
     
     exit 1
 fi
+
+echo
+echo -e "${GREEN}🎉 ¡Configuración de MySQL completada exitosamente!${NC}"
+echo -e "${BLUE}La tabla 'metrics' está lista para recibir datos en formato JSON${NC}"

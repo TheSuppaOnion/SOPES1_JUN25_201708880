@@ -23,9 +23,9 @@ const io = socketIo(server, {
 app.use(cors());
 app.use(express.json());
 
-// Configuración de base de datos para MySQL local
+// Configuración de base de datos - CAMBIAR POR TU IP REAL
 const dbConfig = {
-  host: process.env.DB_HOST || '192.168.49.1', // IP del host desde Minikube
+  host: process.env.DB_HOST || 'TU_IP_AQUI', // ← CAMBIAR POR LA IP QUE MOSTRÓ EL SCRIPT
   port: process.env.DB_PORT || 3306,
   user: process.env.DB_USER || 'monitor',
   password: process.env.DB_PASSWORD || 'monitor123',
@@ -41,7 +41,7 @@ let pool;
 async function initializeDatabase() {
   try {
     pool = mysql.createPool(dbConfig);
-    console.log('Pool de conexiones MySQL creado');
+    console.log('✓ Pool de conexiones MySQL creado');
     
     // Probar conexión
     const connection = await pool.getConnection();
@@ -49,14 +49,23 @@ async function initializeDatabase() {
     connection.release();
     console.log('✓ Conexión a base de datos exitosa');
     
+    // Verificar que existe la tabla metrics
+    const [tables] = await pool.execute("SHOW TABLES LIKE 'metrics'");
+    if (tables.length === 0) {
+      console.error('X Tabla "metrics" no encontrada');
+      return false;
+    }
+    
+    console.log('✓ Tabla "metrics" encontrada');
     return true;
   } catch (error) {
-    console.error('X Error conectando a base de datos:', error);
+    console.error('X Error conectando a base de datos:', error.message);
+    console.error('X Verifica que la IP de BD sea correcta:', dbConfig.host);
     return false;
   }
 }
 
-// FUNCIÓN PRINCIPAL: Obtener últimas métricas de la BD
+// FUNCIÓN PRINCIPAL: Obtener últimas métricas de la tabla METRICS unificada
 async function getLatestMetrics() {
   try {
     // Obtener el registro más reciente de la tabla metrics
@@ -65,45 +74,76 @@ async function getLatestMetrics() {
     );
 
     if (rows.length === 0) {
+      console.log('⚠ No hay datos en la tabla metrics');
       return {
-        cpu: { porcentaje_uso: 0 },
-        ram: { porcentaje_uso: 0, total_gb: 0, libre_gb: 0 },
-        procesos: { total_procesos: 0, procesos_corriendo: 0 }
+        timestamp: Date.now(),
+        cpu: { porcentaje_uso: 0, porcentaje_libre: 100 },
+        ram: { 
+          total: 0, libre: 0, uso: 0, porcentaje_uso: 0, 
+          total_gb: 0, libre_gb: 0 
+        },
+        procesos: { 
+          total_procesos: 0, procesos_corriendo: 0, 
+          procesos_durmiendo: 0, procesos_zombie: 0, procesos_parados: 0 
+        },
+        api_source: 'no_data',
+        last_update: new Date().toISOString()
       };
     }
 
     const latest = rows[0];
+    console.log('📊 Datos obtenidos de BD:', {
+      id: latest.id,
+      cpu: `${latest.porcentaje_cpu_uso}%`,
+      ram: `${latest.porcentaje_ram}%`,
+      procesos: latest.total_procesos,
+      api_source: latest.api_source,
+      hora: latest.hora
+    });
 
-    // Transformar datos para el frontend
+    // Transformar datos EXACTAMENTE como los espera el frontend
+    // Usando los campos de tu JSON tal como están
     return {
       timestamp: Date.now(),
+      
+      // CPU - directamente de tu JSON
       cpu: {
         porcentaje_uso: parseFloat(latest.porcentaje_cpu_uso) || 0,
-        porcentaje_libre: parseFloat(latest.porcentaje_cpu_libre) || 0
+        porcentaje_libre: parseFloat(latest.porcentaje_cpu_libre) || (100 - parseFloat(latest.porcentaje_cpu_uso))
       },
+      
+      // RAM - directamente de tu JSON
       ram: {
-        total: latest.total_ram || 0,
-        libre: latest.ram_libre || 0,
-        uso: latest.uso_ram || 0,
-        porcentaje_uso: parseFloat(latest.porcentaje_ram) || 0,
+        total: latest.total_ram || 0,                    // total_ram del JSON
+        libre: latest.ram_libre || 0,                   // ram_libre del JSON
+        uso: latest.uso_ram || 0,                       // uso_ram del JSON
+        porcentaje_uso: parseFloat(latest.porcentaje_ram) || 0, // porcentaje_ram del JSON
+        
+        // Conversiones para el frontend
         total_gb: Math.round((latest.total_ram || 0) / 1024 * 100) / 100,
-        libre_gb: Math.round((latest.ram_libre || 0) / (1024 * 1024 * 1024) * 100) / 100
+        libre_gb: Math.round((latest.ram_libre || 0) / (1024 * 1024 * 1024) * 100) / 100,
+        uso_gb: Math.round((latest.uso_ram || 0) / 1024 * 100) / 100
       },
+      
+      // Procesos - directamente de tu JSON
       procesos: {
-        total_procesos: latest.total_procesos || 0,
-        procesos_corriendo: latest.procesos_corriendo || 0,
-        procesos_durmiendo: latest.procesos_durmiendo || 0,
-        procesos_zombie: latest.procesos_zombie || 0,
-        procesos_parados: latest.procesos_parados || 0
+        total_procesos: latest.total_procesos || 0,         // total_procesos del JSON
+        procesos_corriendo: latest.procesos_corriendo || 0, // procesos_corriendo del JSON
+        procesos_durmiendo: latest.procesos_durmiendo || 0, // procesos_durmiendo del JSON
+        procesos_zombie: latest.procesos_zombie || 0,       // procesos_zombie del JSON
+        procesos_parados: latest.procesos_parados || 0      // procesos_parados del JSON
       },
-      api_source: latest.api_source,
-      last_update: latest.hora,
+      
+      // Metadatos
+      api_source: latest.api_source || 'unknown',
+      last_update: latest.hora || latest.timestamp,
+      db_id: latest.id,
       formatted_time: new Date().toLocaleString('es-GT', {
         timeZone: 'America/Guatemala'
       })
     };
   } catch (error) {
-    console.error('X Error obteniendo métricas:', error);
+    console.error('X Error obteniendo métricas de tabla metrics:', error.message);
     return null;
   }
 }
@@ -116,12 +156,15 @@ async function getHistoricalData(minutes = 30) {
     const [rows] = await pool.execute(
       `SELECT 
          timestamp, porcentaje_cpu_uso, porcentaje_ram, 
-         total_ram, uso_ram, total_procesos, api_source
+         total_ram, uso_ram, total_procesos, api_source, hora
        FROM metrics 
        WHERE timestamp >= ? 
-       ORDER BY timestamp ASC`,
+       ORDER BY timestamp ASC
+       LIMIT 1000`,
       [timeLimit]
     );
+
+    console.log(`📈 Datos históricos: ${rows.length} registros de los últimos ${minutes} minutos`);
 
     return {
       cpu: rows.map(row => ({
@@ -142,7 +185,7 @@ async function getHistoricalData(minutes = 30) {
       time_range: `${minutes} minutos`
     };
   } catch (error) {
-    console.error('X Error obteniendo datos históricos:', error);
+    console.error('X Error obteniendo datos históricos:', error.message);
     return { cpu: [], ram: [], total_records: 0 };
   }
 }
@@ -150,7 +193,6 @@ async function getHistoricalData(minutes = 30) {
 // Obtener estadísticas del sistema
 async function getSystemStats() {
   try {
-    // Estadísticas de las últimas 24 horas
     const last24h = new Date(Date.now() - (24 * 60 * 60 * 1000));
     
     const [stats] = await pool.execute(
@@ -197,7 +239,7 @@ async function getSystemStats() {
       period: '24h'
     };
   } catch (error) {
-    console.error('X Error obteniendo estadísticas:', error);
+    console.error('X Error obteniendo estadísticas:', error.message);
     return null;
   }
 }
@@ -208,25 +250,27 @@ io.on('connection', (socket) => {
 
   // Enviar bienvenida y métricas iniciales
   socket.emit('welcome', {
-    message: 'Conectado al sistema de monitoreo WebSocket',
+    message: 'Conectado al sistema de monitoreo WebSocket - Solo tabla METRICS',
     timestamp: Date.now(),
-    client_id: socket.id
+    client_id: socket.id,
+    data_source: 'tabla_metrics_unificada'
   });
 
   // Enviar métricas actuales inmediatamente
   getLatestMetrics().then(metrics => {
     if (metrics) {
       socket.emit('metrics_update', metrics);
+      console.log(`📤 Métricas iniciales enviadas a ${socket.id}`);
     }
   });
 
-  // Cliente solicita métricas en tiempo real
+  // Cliente solicita métricas
   socket.on('request_metrics', async () => {
     const metrics = await getLatestMetrics();
     if (metrics) {
       socket.emit('metrics_update', metrics);
     } else {
-      socket.emit('error', { message: 'No hay datos disponibles' });
+      socket.emit('error', { message: 'No hay datos disponibles en tabla metrics' });
     }
   });
 
@@ -250,13 +294,12 @@ io.on('connection', (socket) => {
     console.log(`X Cliente desconectado: ${socket.id}`);
   });
 
-  // Manejo de errores del socket
   socket.on('error', (error) => {
     console.error(`X Error en socket ${socket.id}:`, error);
   });
 });
 
-// BROADCAST AUTOMÁTICO: Enviar métricas actualizadas cada X segundos
+// BROADCAST AUTOMÁTICO cada 2 segundos
 let broadcastInterval;
 
 function startMetricsBroadcast(intervalSeconds = 2) {
@@ -267,12 +310,14 @@ function startMetricsBroadcast(intervalSeconds = 2) {
       const metrics = await getLatestMetrics();
       if (metrics) {
         io.emit('metrics_update', metrics);
-        console.log(`✓ Métricas enviadas a ${connectedClients} cliente(s) - CPU: ${metrics.cpu.porcentaje_uso}%, RAM: ${metrics.ram.porcentaje_uso}%`);
+        console.log(`✓ Broadcast → ${connectedClients} cliente(s) | CPU: ${metrics.cpu.porcentaje_uso}% | RAM: ${metrics.ram.porcentaje_uso}% | API: ${metrics.api_source}`);
+      } else {
+        console.log(`⚠ No hay métricas para enviar a ${connectedClients} cliente(s)`);
       }
     }
   }, intervalSeconds * 1000);
   
-  console.log(`✓ Broadcast automático iniciado cada ${intervalSeconds}s`);
+  console.log(`✓ Broadcast automático iniciado cada ${intervalSeconds}s (solo tabla metrics)`);
 }
 
 function stopMetricsBroadcast() {
@@ -282,82 +327,95 @@ function stopMetricsBroadcast() {
   }
 }
 
-// API REST endpoints para health check y debug
+// API REST endpoints
 app.get('/health', async (req, res) => {
   try {
     const connection = await pool.getConnection();
     await connection.ping();
     connection.release();
     
+    // Contar registros en tabla metrics
+    const [count] = await pool.execute('SELECT COUNT(*) as total FROM metrics');
+    
     res.json({
       status: 'healthy',
-      service: 'WebSocket API - Data Reader',
+      service: 'WebSocket API - Reader tabla METRICS unificada',
       timestamp: new Date().toISOString(),
       connected_clients: io.engine.clientsCount,
       database: 'connected',
-      role: 'Leer datos de BD y transmitir via WebSocket'
+      table: 'metrics',
+      total_records: count[0]?.total || 0,
+      db_host: dbConfig.host,
+      role: 'Leer SOLO tabla metrics y transmitir via WebSocket'
     });
   } catch (error) {
     res.status(503).json({
       status: 'unhealthy',
       service: 'WebSocket API',
       error: error.message,
-      database: 'disconnected'
+      database: 'disconnected',
+      db_host: dbConfig.host
     });
   }
 });
 
-app.get('/clients', (req, res) => {
-  res.json({
-    connected_clients: io.engine.clientsCount,
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Endpoint para probar métricas vía REST
 app.get('/api/metrics', async (req, res) => {
   try {
     const metrics = await getLatestMetrics();
     if (metrics) {
-      res.json(metrics);
+      res.json({
+        success: true,
+        data: metrics,
+        source: 'tabla_metrics_unificada'
+      });
     } else {
-      res.status(404).json({ error: 'No hay métricas disponibles' });
+      res.status(404).json({ 
+        success: false, 
+        error: 'No hay métricas disponibles en tabla metrics' 
+      });
     }
   } catch (error) {
-    res.status(500).json({ error: 'Error obteniendo métricas' });
+    res.status(500).json({ 
+      success: false, 
+      error: 'Error obteniendo métricas', 
+      details: error.message 
+    });
   }
 });
 
 app.get('/', (req, res) => {
   res.json({
     service: 'Sistema de Monitoreo - WebSocket API',
-    version: '2.0.0',
+    version: '2.0.0 - Tabla METRICS unificada',
     author: 'Bismarck Romero - 201708880',
     description: 'API WebSocket para transmisión de métricas en tiempo real',
-    role: 'Leer datos de BD (insertados por API Node.js/Python) y transmitir al Frontend',
+    role: 'Leer SOLO tabla "metrics" y transmitir al Frontend',
+    table_structure: 'metrics (total_ram, ram_libre, uso_ram, porcentaje_ram, porcentaje_cpu_uso, etc.)',
     api_type: 'WebSocket/Socket.IO',
     endpoints: {
       websocket: `ws://localhost:${PORT}`,
       health: 'GET /health',
-      clients: 'GET /clients',
       metrics: 'GET /api/metrics'
     },
     socket_events: {
       outgoing: ['welcome', 'metrics_update', 'historical_data', 'system_stats', 'error'],
       incoming: ['request_metrics', 'request_historical', 'request_stats']
     },
-    data_flow: 'BD → WebSocket API → Frontend (tiempo real)'
+    data_flow: 'BD tabla metrics → WebSocket API → Frontend'
   });
 });
 
 // Inicializar servidor
 async function startServer() {
-  console.log('Iniciando WebSocket API - Lector de BD...');
+  console.log('🚀 Iniciando WebSocket API - Lector de tabla METRICS...');
+  console.log(`📊 Configuración BD: ${dbConfig.host}:${dbConfig.port}/${dbConfig.database}`);
   
   // Inicializar base de datos
   const dbConnected = await initializeDatabase();
   if (!dbConnected) {
-    console.error('X No se pudo conectar a la base de datos. Saliendo...');
+    console.error('X No se pudo conectar a la base de datos. Verifica la IP y configuración.');
+    console.error(`X Host configurado: ${dbConfig.host}`);
+    console.error('X Ejecuta: ./setup-mysql-local.sh para obtener la IP correcta');
     process.exit(1);
   }
 
@@ -366,10 +424,11 @@ async function startServer() {
     console.log(`✓ WebSocket API ejecutándose en puerto ${PORT}`);
     console.log(`✓ Socket.IO: ws://localhost:${PORT}`);
     console.log(`✓ Health check: http://localhost:${PORT}/health`);
-    console.log('✓ Función: Leer datos de BD y transmitir al frontend');
+    console.log('✓ Función: Leer SOLO tabla "metrics" y transmitir al frontend');
+    console.log('📋 Tabla monitoreada: metrics (formato JSON unificado)');
     
-    // Iniciar broadcast automático de métricas
-    startMetricsBroadcast(2); // Cada 2 segundos
+    // Iniciar broadcast automático
+    startMetricsBroadcast(2);
   });
 }
 
@@ -394,7 +453,7 @@ process.on('SIGINT', () => {
   });
 });
 
-// Manejo de errores no capturados
+// Manejo de errores
 process.on('unhandledRejection', (reason, promise) => {
   console.error('X Unhandled Rejection at:', promise, 'reason:', reason);
 });

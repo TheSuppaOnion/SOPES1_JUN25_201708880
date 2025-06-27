@@ -8,7 +8,7 @@ app = Flask(__name__)
 
 # Configuración de base de datos para MySQL local
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST', '192.168.49.1'),
+    'host': os.getenv('DB_HOST', '172.28.84.245'),
     'port': int(os.getenv('DB_PORT', 3306)),
     'user': os.getenv('DB_USER', 'monitor'),
     'password': os.getenv('DB_PASSWORD', 'monitor123'),

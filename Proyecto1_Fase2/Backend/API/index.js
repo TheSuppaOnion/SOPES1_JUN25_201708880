@@ -11,7 +11,7 @@ app.use(cors());
 
 // Configuración de base de datos para MySQL local
 const dbConfig = {
-    host: process.env.DB_HOST || '192.168.49.1',
+    host: process.env.DB_HOST || '172.28.84.245',
     port: process.env.DB_PORT || 3306,
     user: process.env.DB_USER || 'monitor',
     password: process.env.DB_PASSWORD || 'monitor123',
