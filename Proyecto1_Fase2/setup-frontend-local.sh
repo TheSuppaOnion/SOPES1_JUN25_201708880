@@ -29,14 +29,6 @@ check_docker() {
     echo -e "${GREEN}✓ Docker está disponible${NC}"
 }
 
-# Hacer build usando Docker (CORREGIDO - sin npm ci)
-build_with_docker() {
-    echo -e "${YELLOW}Construyendo build de React a partir del src existente...${NC}"
-    cd Frontend
-    docker run --rm -v "$PWD":/app -w /app node:18-alpine sh -c "npm install --silent && npm run build"
-    cd ..
-}
-
 # Construir imagen Docker del Frontend (usando multi-stage build directamente)
 build_frontend_image() {
     echo -e "${YELLOW}Intentando obtener la imagen desde Docker Hub...${NC}"
@@ -111,7 +103,6 @@ main() {
             echo -e "${YELLOW}=== INSTALACIÓN DEL FRONTEND ===${NC}"
             check_docker
             build_frontend_image
-            build_with_docker
             run_frontend_container
             show_status
             echo
@@ -119,7 +110,6 @@ main() {
             ;;
         "build")
             check_docker
-            build_with_docker
             echo -e "${GREEN}✓ Build completado${NC}"
             ;;
         "start")
@@ -147,7 +137,6 @@ main() {
             docker rm frontend-local 2>/dev/null || true
             docker rmi bismarckr/frontend-fase2:latest 2>/dev/null || true
             build_frontend_image
-            build_with_docker
             run_frontend_container
             show_status
             ;;
