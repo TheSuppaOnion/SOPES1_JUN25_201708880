@@ -42,7 +42,6 @@ cd "$LOCUST_DIR"
 echo -e "${YELLOW}Ejecutando Locust para recolectar métricas...${NC}"
 
 python -m locust -f locustfile.py \
-    --host=http://localhost:3000 \
     --users=300 \
     --spawn-rate=1 \
     --run-time=180 \
