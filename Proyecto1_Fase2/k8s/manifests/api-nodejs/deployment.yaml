@@ -18,7 +18,7 @@ spec:
       containers:
       - name: api-nodejs
         image: bismarckr/api-nodejs-fase2:latest
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         ports:
         - containerPort: 3000
         env:
@@ -39,3 +39,15 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "300m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 10

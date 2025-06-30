@@ -6,7 +6,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '20mb' }));
 app.use(cors());
 
 // Configuración de base de datos para MySQL local
@@ -74,64 +74,51 @@ async function createTables() {
 
 // ENDPOINT PRINCIPAL - Recibir datos de Locust via Ingress
 app.post('/api/data', async (req, res) => {
+    let data = req.body;
+
+    // Si es un solo objeto, lo convertimos en arreglo
+    if (!Array.isArray(data)) {
+        data = [data];
+    }
+
     try {
-        const data = req.body;
-        
-        // Validar datos requeridos
-        if (!data.total_ram || !data.porcentaje_cpu_uso) {
-            return res.status(400).json({
-                success: false,
-                error: 'Datos faltantes: total_ram y porcentaje_cpu_uso son requeridos'
-            });
+        for (const item of data) {
+            // Validar datos requeridos
+            if (item.total_ram === undefined || item.porcentaje_cpu_uso === undefined) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Datos faltantes: total_ram y porcentaje_cpu_uso son requeridos'
+                });
+            }
+            const insertQuery = `
+                INSERT INTO metrics (
+                    total_ram, ram_libre, uso_ram, porcentaje_ram,
+                    porcentaje_cpu_uso, porcentaje_cpu_libre,
+                    procesos_corriendo, total_procesos, procesos_durmiendo,
+                    procesos_zombie, procesos_parados, hora, api_source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `;
+            const values = [
+                item.total_ram || 0,
+                item.ram_libre || 0,
+                item.uso_ram || 0,
+                item.porcentaje_ram || 0,
+                item.porcentaje_cpu_uso || 0,
+                item.porcentaje_cpu_libre || 0,
+                item.procesos_corriendo || 0,
+                item.total_procesos || 0,
+                item.procesos_durmiendo || 0,
+                item.procesos_zombie || 0,
+                item.procesos_parados || 0,
+                item.hora || new Date().toISOString(),
+                'nodejs'
+            ];
+            await pool.execute(insertQuery, values);
         }
-        
-        // Insertar en base de datos
-        const insertQuery = `
-            INSERT INTO metrics (
-                total_ram, ram_libre, uso_ram, porcentaje_ram,
-                porcentaje_cpu_uso, porcentaje_cpu_libre,
-                procesos_corriendo, total_procesos, procesos_durmiendo,
-                procesos_zombie, procesos_parados, hora, api_source
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `;
-        
-        const values = [
-            data.total_ram || 0,
-            data.ram_libre || 0,
-            data.uso_ram || 0,
-            data.porcentaje_ram || 0,
-            data.porcentaje_cpu_uso || 0,
-            data.porcentaje_cpu_libre || 0,
-            data.procesos_corriendo || 0,
-            data.total_procesos || 0,
-            data.procesos_durmiendo || 0,
-            data.procesos_zombie || 0,
-            data.procesos_parados || 0,
-            data.hora || new Date().toISOString(),
-            'nodejs'
-        ];
-        
-        const [result] = await pool.execute(insertQuery, values);
-        
-        console.log('✓ Datos recibidos y guardados:', {
-            id: result.insertId,
-            timestamp: data.hora,
-            cpu: data.porcentaje_cpu_uso,
-            ram: data.porcentaje_ram,
-            procesos: data.total_procesos
-        });
-        
-        res.status(201).json({
-            success: true,
-            message: 'Datos guardados correctamente en API Node.js',
-            id: result.insertId,
-            timestamp: new Date().toISOString(),
-            api: 'nodejs'
-        });
-        
+        return res.status(201).json({ success: true, message: 'Datos guardados' });
     } catch (error) {
         console.error('X Error procesando datos:', error.message);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             error: 'Error interno del servidor',
             api: 'nodejs'
@@ -210,6 +197,10 @@ app.get('/api/stats', async (req, res) => {
     } catch (error) {
         res.status(500).json({ error: 'Error obteniendo estadísticas' });
     }
+});
+
+app.get('/', (req, res) => {
+          res.status(200).send('OK');
 });
 
 // Inicializar servidor

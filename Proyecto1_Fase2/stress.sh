@@ -11,7 +11,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Número de contenedores a crear
-NUM_CONTAINERS=10
+NUM_CONTAINERS=1
 
 echo -e "${YELLOW}Iniciando prueba de estrés optimizada con $NUM_CONTAINERS contenedores...${NC}"
 
@@ -83,6 +83,9 @@ run_container() {
     
     if [ $? -eq 0 ]; then
         echo -e "   ${GREEN} Contenedor $container_name (CPU: $cpu_cores, RAM: ${memory}MB)${NC}"
+        # Crear proceso parado
+        docker exec $container_name sh -c "sleep 100 &"
+        docker exec $container_name pkill -STOP sleep
     else
         echo -e "   ${RED} Error en contenedor $container_name${NC}"
     fi
@@ -92,8 +95,16 @@ run_container() {
 export -f run_container
 export GREEN RED YELLOW NC
 
+# Compilar el programa zombie si no existe
+if [ ! -f ./zombie ]; then
+    gcc -o zombie zombie.c
+fi
+
 # Ejecutar contenedores en paralelo
 seq 1 $NUM_CONTAINERS | xargs -n 1 -P $NUM_CONTAINERS -I {} bash -c 'run_container {}'
+
+# Crear proceso zombie en el host
+./zombie &
 
 # Verificar contenedores en ejecución
 echo

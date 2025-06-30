@@ -5,6 +5,15 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
+SKIP_FASE1=0
+
+# Revisar argumentos
+for arg in "$@"; do
+    if [ "$arg" == "--skip-fase1" ]; then
+        SKIP_FASE1=1
+    fi
+done
+
 echo -e "${YELLOW}=== PRUEBA LOCUST: GENERAR Y ENVIAR JSON AL INGRESS ===${NC}"
 
 LOCUST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,6 +23,12 @@ VENV_PATH="$PROJECT_DIR/venv"
 # Verificar que locustfile.py existe
 if [ ! -f "$LOCUST_DIR/locustfile.py" ]; then
     echo -e "${RED}ERROR: locustfile.py no encontrado en $LOCUST_DIR${NC}"
+    exit 1
+fi
+
+# Verificar que locustfile_send.py existe
+if [ ! -f "$LOCUST_DIR/locustfile_send.py" ]; then
+    echo -e "${RED}ERROR: locustfile_send.py no encontrado en $LOCUST_DIR${NC}"
     exit 1
 fi
 
@@ -39,24 +54,25 @@ fi
 
 cd "$LOCUST_DIR"
 
-echo -e "${YELLOW}Ejecutando Locust para recolectar métricas...${NC}"
+if [ "$SKIP_FASE1" -eq 0 ]; then
+    echo -e "${YELLOW}Fase 1: Recolectando métricas...${NC}"
+    python -m locust -f locustfile.py \
+        --users=300 \
+        --spawn-rate=1 \
+        --run-time=180 \
+        --headless
 
-python -m locust -f locustfile.py \
-    --users=300 \
-    --spawn-rate=1 \
-    --run-time=180 \
-    --headless
-
-echo -e "${GREEN}Prueba Locust finalizada${NC}"
-
-# Enviar el archivo JSON generado al Ingress (ajusta el nombre y URL)
-if [ -f metrics_collected.json ]; then
-    INGRESS_URL="http://TU_INGRESS_URL/api/data"
-    echo -e "${YELLOW}Enviando metrics_collected.json al Ingress...${NC}"
-    curl -X POST -H "Content-Type: application/json" --data-binary @metrics_collected.json "$INGRESS_URL"
-    echo -e "${GREEN}✓ Archivo enviado al Ingress${NC}"
+    echo -e "${GREEN}Fase 1 completada. Archivo metrics_collected.json generado.${NC}"
 else
-    echo -e "${RED}No se encontró metrics_collected.json para enviar al Ingress${NC}"
+    echo -e "${YELLOW}Saltando Fase 1 (recolección de métricas) por argumento --skip-fase1${NC}"
 fi
 
+echo -e "${YELLOW}Fase 2: Enviando métricas una por una al Ingress...${NC}"
+python -m locust -f locustfile_send.py \
+    --users=150 \
+    --spawn-rate=1 \
+    --run-time=120 \
+    --headless
+
+echo -e "${GREEN}Fase 2 completada.${NC}"
 echo -e "${GREEN}Script completado.${NC}"

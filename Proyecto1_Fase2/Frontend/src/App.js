@@ -77,8 +77,8 @@ function App() {
     datasets: [
       {
         data: [
-          metrics ? metrics.porcentaje_cpu_uso : 0,
-          metrics ? metrics.porcentaje_cpu_libre : 100
+          metrics ? metrics.cpu.porcentaje_uso : 0,
+          metrics ? metrics.cpu.porcentaje_libre : 100
         ],
         backgroundColor: ['#3498db', '#ecf0f1'],
         borderColor: ['#2980b9', '#bdc3c7'],
@@ -93,8 +93,8 @@ function App() {
     datasets: [
       {
         data: [
-          metrics ? metrics.porcentaje_ram : 0,
-          metrics ? 100 - (metrics ? metrics.porcentaje_ram : 0) : 100
+          metrics ? metrics.ram.porcentaje_uso : 0,
+          metrics ? 100 - (metrics ? metrics.ram.porcentaje_uso : 0) : 100
         ],
         backgroundColor: ['#e74c3c', '#ecf0f1'],
         borderColor: ['#c0392b', '#bdc3c7'],
@@ -133,8 +133,8 @@ function App() {
           <div className="metrics-details">
             {metrics ? (
               <>
-                <p>Uso actual: <strong>{metrics.porcentaje_cpu_uso}%</strong></p>
-                <p>Disponible: <strong>{metrics.porcentaje_cpu_libre}%</strong></p>
+                <p>Uso actual: <strong>{metrics ? metrics.cpu.porcentaje_uso : 0}%</strong></p>
+                <p>Disponible: <strong>{metrics ? metrics.cpu.porcentaje_libre : 0}%</strong></p>
               </>
             ) : (
               <p>Esperando datos del WebSocket...</p>
@@ -155,9 +155,9 @@ function App() {
           <div className="metrics-details">
             {metrics ? (
               <>
-                <p>Memoria total: <strong>{metrics.total_ram} MB</strong></p>
-                <p>Memoria en uso: <strong>{metrics.uso_ram} MB ({metrics.porcentaje_ram}%)</strong></p>
-                <p>Memoria libre: <strong>{formatBytes(metrics.ram_libre)}</strong></p>
+                <p>Memoria total: <strong>{metrics ? metrics.ram.total : 0} MB</strong></p>
+                <p>Memoria en uso: <strong>{metrics ? metrics.ram.uso : 0} MB ({metrics ? metrics.ram.porcentaje_uso : 0}%)</strong></p>
+                <p>Memoria libre: <strong>{metrics ? formatBytes(metrics.ram.libre) : 0}</strong></p>
               </>
             ) : (
               <p>Esperando datos del WebSocket...</p>
@@ -183,27 +183,27 @@ function App() {
                 <>
                   <tr className="corriendo">
                     <td className="estado">Corriendo</td>
-                    <td className="cantidad">{metrics.procesos_corriendo}</td>
+                    <td className="cantidad">{metrics ? metrics.procesos.procesos_corriendo : 0}</td>
                     <td className="descripcion">Procesos activamente ejecutándose en CPU</td>
                   </tr>
                   <tr className="durmiendo">
                     <td className="estado">Durmiendo</td>
-                    <td className="cantidad">{metrics.procesos_durmiendo}</td>
+                    <td className="cantidad">{metrics ? metrics.procesos.procesos_durmiendo : 0}</td>
                     <td className="descripcion">Procesos esperando recursos o eventos</td>
                   </tr>
                   <tr className="zombie">
                     <td className="estado">Zombie</td>
-                    <td className="cantidad">{metrics.procesos_zombie}</td>
+                    <td className="cantidad">{metrics ? metrics.procesos.procesos_zombie : 0}</td>
                     <td className="descripcion">Procesos terminados pendientes de limpieza</td>
                   </tr>
                   <tr className="parados">
                     <td className="estado">Parados</td>
-                    <td className="cantidad">{metrics.procesos_parados}</td>
+                    <td className="cantidad">{metrics ? metrics.procesos.procesos_parados : 0}</td>
                     <td className="descripcion">Procesos suspendidos o detenidos</td>
                   </tr>
                   <tr className="total">
                     <td className="estado">Total</td>
-                    <td className="cantidad">{metrics.total_procesos}</td>
+                    <td className="cantidad">{metrics ? metrics.procesos.total_procesos : 0}</td>
                     <td className="descripcion">Total de procesos en el sistema</td>
                   </tr>
                 </>

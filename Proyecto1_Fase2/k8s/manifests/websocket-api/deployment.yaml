@@ -18,7 +18,7 @@ spec:
       containers:
       - name: websocket-api
         image: bismarckr/websocket-api-fase2:latest
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         ports:
         - containerPort: 4000
         env:

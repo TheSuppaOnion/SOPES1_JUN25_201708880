@@ -9,7 +9,16 @@ spec:
   selector:
     app: websocket-api
   ports:
-  - port: 4000
-    targetPort: 4000
-    protocol: TCP
-  type: ClusterIP
+    - name: ws
+      port: 4000
+      targetPort: 4000
+      protocol: TCP
+    - name: http
+      port: 80
+      targetPort: 4000
+      protocol: TCP
+    - name: ext-8080
+      port: 8080
+      targetPort: 4000
+      protocol: TCP
+  type: LoadBalancer

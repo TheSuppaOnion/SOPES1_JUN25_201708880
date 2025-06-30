@@ -1,38 +1,43 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: monitor-ingress
+  name: api-traffic-split
   namespace: so1-fase2
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-    nginx.ingress.kubernetes.io/upstream-weight-nodejs: "70"
-    nginx.ingress.kubernetes.io/upstream-weight-python: "30"
+    nginx.ingress.kubernetes.io/canary: "true"
+    nginx.ingress.kubernetes.io/canary-weight: "50"
+    nginx.ingress.kubernetes.io/proxy-body-size: "20m"
 spec:
+  ingressClassName: nginx
   rules:
-  - host: monitor.local
-    http:
-      paths:
-      # Frontend
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: frontend-service
-            port:
-              number: 8080
-      # WebSocket API
-      - path: /ws
-        pathType: Prefix
-        backend:
-          service:
-            name: websocket-api-service
-            port:
-              number: 4000
-      # API Traffic Split (70% Node.js, 30% Python)
-      - path: /api
-        pathType: Prefix
-        backend:
-          service:
-            name: api-nodejs-service
-            port:
-              number: 3000
+    - host: api.monitor.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api-python-service
+                port:
+                  number: 5000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-main
+  namespace: so1-fase2
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "20m"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: api.monitor.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api-nodejs-service
+                port:
+                  number: 3000

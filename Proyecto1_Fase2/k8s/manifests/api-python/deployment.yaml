@@ -20,7 +20,7 @@ spec:
       containers:
       - name: api-python
         image: bismarckr/api-python-fase2:latest
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         ports:
         - containerPort: 5000
         env:
@@ -41,3 +41,15 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "300m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 10

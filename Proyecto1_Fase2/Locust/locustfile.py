@@ -1,13 +1,11 @@
 from locust import HttpUser, task, between
 import json
-import requests
 
-AGENTE_URL = "http://[IP_PUBLICA_DE_LA_VM]:8080"  
-INGRESS_URL = "http://INGRESS_URL/api/data"
+AGENTE_URL = "http://[IP_PUBLICA_DE_LA_VM]:8080"
 
 class AgenteUser(HttpUser):
     wait_time = between(1, 2)
-    host = AGENTE_URL 
+    host = AGENTE_URL
     collected_jsons = []
 
     @task(1)
@@ -27,15 +25,3 @@ class AgenteUser(HttpUser):
         with open("metrics_collected.json", "w") as f:
             json.dump(self.collected_jsons, f, indent=2)
         print(f"Guardado metrics_collected.json con {len(self.collected_jsons)} métricas.")
-
-        headers = {"Content-Type": "application/json"}
-        try:
-            with open("metrics_collected.json", "r") as f:
-                data = f.read()
-            resp = requests.post(INGRESS_URL, data=data, headers=headers)
-            if resp.status_code == 200:
-                print("✓ Archivo JSON enviado correctamente al Ingress")
-            else:
-                print(f"✗ Error al enviar archivo JSON: HTTP {resp.status_code}")
-        except Exception as e:
-            print(f"✗ Error al enviar archivo JSON al Ingress: {e}")

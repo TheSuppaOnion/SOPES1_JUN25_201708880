@@ -5,6 +5,7 @@ import os
 from datetime import datetime
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024 # 20 MB
 
 # Configuración de base de datos para MySQL local
 DB_CONFIG = {
@@ -25,7 +26,7 @@ def initialize_database():
     try:
         connection_pool = pooling.MySQLConnectionPool(
             pool_name="api_python_pool",
-            pool_size=5,
+            pool_size=20,
             pool_reset_session=True,
             **DB_CONFIG
         )
@@ -78,29 +79,33 @@ def create_tables():
         if 'conn' in locals():
             conn.close()
 
+def get_connection():
+    global connection_pool
+    if connection_pool is None:
+        print("Inicializando pool de conexiones en el worker Flask (get_connection)...")
+        initialize_database()
+    return connection_pool.get_connection()
+
 # ENDPOINT PRINCIPAL - Recibir datos de Locust via Ingress
 @app.route('/api/data', methods=['POST'])
 def receive_data():
+    data = request.get_json()
+    print("DATA RECIBIDA:", data)
+
+    # Si es un solo objeto, lo convertimos en lista
+    if isinstance(data, dict):
+        data = [data]
+
+    if not isinstance(data, list):
+        return jsonify({
+            'success': False,
+            'error': 'El cuerpo debe ser un arreglo de objetos o un objeto'
+        }), 400
+
     try:
-        data = request.get_json()
-        
-        if not data:
-            return jsonify({
-                'success': False,
-                'error': 'No se recibieron datos JSON'
-            }), 400
-        
-        # Validar datos requeridos
-        if 'total_ram' not in data or 'porcentaje_cpu_uso' not in data:
-            return jsonify({
-                'success': False,
-                'error': 'Datos faltantes: total_ram y porcentaje_cpu_uso son requeridos'
-            }), 400
-        
-        # Insertar en base de datos
-        conn = connection_pool.get_connection()
+        conn = get_connection()
         cursor = conn.cursor()
-        
+
         insert_query = """
         INSERT INTO metrics (
             total_ram, ram_libre, uso_ram, porcentaje_ram,
@@ -109,97 +114,37 @@ def receive_data():
             procesos_zombie, procesos_parados, hora, api_source
         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
-        
-        values = (
-            data.get('total_ram', 0),
-            data.get('ram_libre', 0),
-            data.get('uso_ram', 0),
-            data.get('porcentaje_ram', 0),
-            data.get('porcentaje_cpu_uso', 0),
-            data.get('porcentaje_cpu_libre', 0),
-            data.get('procesos_corriendo', 0),
-            data.get('total_procesos', 0),
-            data.get('procesos_durmiendo', 0),
-            data.get('procesos_zombie', 0),
-            data.get('procesos_parados', 0),
-            data.get('hora', datetime.now().isoformat()),
-            'python'
-        )
-        
-        cursor.execute(insert_query, values)
-        row_id = cursor.lastrowid
-        
-        print(f"✓ Datos recibidos y guardados: ID={row_id}, CPU={data.get('porcentaje_cpu_uso')}, RAM={data.get('porcentaje_ram')}, Procesos={data.get('total_procesos')}")
-        
-        return jsonify({
-            'success': True,
-            'message': 'Datos guardados correctamente en API Python',
-            'id': row_id,
-            'timestamp': datetime.now().isoformat(),
-            'api': 'python'
-        }), 201
-        
+
+        for item in data:
+            values = (
+                item.get('total_ram', 0),
+                item.get('ram_libre', 0),
+                item.get('uso_ram', 0),
+                item.get('porcentaje_ram', 0),
+                item.get('porcentaje_cpu_uso', 0),
+                item.get('porcentaje_cpu_libre', 0),
+                item.get('procesos_corriendo', 0),
+                item.get('total_procesos', 0),
+                item.get('procesos_durmiendo', 0),
+                item.get('procesos_zombie', 0),
+                item.get('procesos_parados', 0),
+                item.get('hora', datetime.now().isoformat()),
+                'python'
+            )
+            cursor.execute(insert_query, values)
+
+        conn.commit()
+        return jsonify({'success': True, 'message': 'Datos guardados'}), 201
+
     except Exception as error:
-        print(f"X Error procesando datos: {error}")
+        import traceback
+        print("X Error procesando datos:", error)
+        traceback.print_exc()  # <--- Esto imprime el stacktrace completo
         return jsonify({
             'success': False,
             'error': 'Error interno del servidor',
             'api': 'python'
         }), 500
-    finally:
-        if 'cursor' in locals():
-            cursor.close()
-        if 'conn' in locals():
-            conn.close()
-
-# Endpoint para obtener métricas (para frontend)
-@app.route('/api/metrics', methods=['GET'])
-def get_metrics():
-    try:
-        conn = connection_pool.get_connection()
-        cursor = conn.cursor(dictionary=True)
-        
-        query = """
-        SELECT * FROM metrics 
-        ORDER BY timestamp DESC 
-        LIMIT 1
-        """
-        
-        cursor.execute(query)
-        result = cursor.fetchone()
-        
-        if not result:
-            return jsonify({
-                'cpu': {'porcentaje_uso': 0},
-                'ram': {'porcentaje_uso': 0, 'total_gb': 0, 'libre_gb': 0},
-                'procesos': {'total_procesos': 0, 'procesos_corriendo': 0}
-            })
-        
-        response = {
-            'cpu': {
-                'porcentaje_uso': float(result.get('porcentaje_cpu_uso', 0))
-            },
-            'ram': {
-                'porcentaje_uso': float(result.get('porcentaje_ram', 0)),
-                'total_gb': (result.get('total_ram', 0) or 0) / 1024,
-                'libre_gb': (result.get('ram_libre', 0) or 0) / (1024 * 1024 * 1024)
-            },
-            'procesos': {
-                'total_procesos': result.get('total_procesos', 0),
-                'procesos_corriendo': result.get('procesos_corriendo', 0),
-                'procesos_durmiendo': result.get('procesos_durmiendo', 0),
-                'procesos_zombie': result.get('procesos_zombie', 0),
-                'procesos_parados': result.get('procesos_parados', 0)
-            },
-            'timestamp': result.get('timestamp'),
-            'api_source': result.get('api_source')
-        }
-        
-        return jsonify(response)
-        
-    except Exception as error:
-        print(f"X Error obteniendo métricas: {error}")
-        return jsonify({'error': 'Error obteniendo métricas'}), 500
     finally:
         if 'cursor' in locals():
             cursor.close()
@@ -220,7 +165,7 @@ def health_check():
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     try:
-        conn = connection_pool.get_connection()
+        conn = get_connection()
         cursor = conn.cursor()
         
         cursor.execute('SELECT COUNT(*) as total FROM metrics')
@@ -243,9 +188,15 @@ def get_stats():
         if 'conn' in locals():
             conn.close()
 
+@app.route('/', methods=['GET'])
+def health():
+    return "OK", 200
+
+print("Iniciando API Python...")
+initialize_database()
+print("connection_pool:", connection_pool)
+print(f"✓ Base de datos: {DB_CONFIG['host']}:{DB_CONFIG['port']}")
+print("✓ Esperando datos de Locust via Ingress...")
+
 if __name__ == '__main__':
-    print("Iniciando API Python...")
-    initialize_database()
-    print(f"✓ Base de datos: {DB_CONFIG['host']}:{DB_CONFIG['port']}")
-    print("✓ Esperando datos de Locust via Ingress...")
     app.run(host='0.0.0.0', port=5000, debug=False)
