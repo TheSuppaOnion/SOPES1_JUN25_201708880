@@ -24,4 +24,4 @@ Sistema de monitoreo en tiempo real para recursos del sistema operativo Linux. U
 - Implementación completa en contenedores Docker
 
 ## Instrucciones Rápidas
-Consulta el [Manual Técnico](./Proyecto1_Fase1/Documentación/Manual%20Técnico.md) para instrucciones detalladas de instalación y uso.
+Consulta el Manual Técnico dependiendo de la fase para instrucciones detalladas de instalación y uso.
