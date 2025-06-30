@@ -5,7 +5,8 @@ Proyecto Sistemas Operativos 1 - Bismarck Romero - 201708880
 Sistema de monitoreo en tiempo real para recursos del sistema operativo Linux. Utiliza módulos del kernel para obtener métricas de CPU y RAM, las almacena en una base de datos MySQL y las visualiza en una interfaz web.
 
 ## Documentación
-- [Manual Técnico](./Proyecto1_Fase1/Documentación/Manual%20Técnico.md)
+- [Manual Técnico Fase 1](./Proyecto1_Fase1/Documentación/Manual%20Técnico.md)
+- [Manual Técnico Fase 2](./Proyecto1_Fase2/Documentación/Manual%20Técnico.md)
 
 ## Tecnologías Utilizadas
 - Módulos del Kernel Linux
